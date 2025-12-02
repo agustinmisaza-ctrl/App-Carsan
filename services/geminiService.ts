@@ -429,7 +429,12 @@ export const connectLiveSession = async (callbacks: {
 
       return ai.live.connect({
         model: LIVE_MODEL,
-        callbacks,
+        callbacks: {
+            onopen: callbacks.onopen ?? (() => {}),
+            onmessage: callbacks.onmessage ?? (() => {}),
+            onclose: callbacks.onclose ?? (() => {}),
+            onerror: callbacks.onerror ?? (() => {}),
+        },
         config: {
             responseModalities: [Modality.AUDIO],
             inputAudioTranscription: {},

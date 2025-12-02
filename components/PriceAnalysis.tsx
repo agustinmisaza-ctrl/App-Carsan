@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { PurchaseRecord, MaterialItem } from '../types';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ScatterChart, Scatter, ComposedChart, Cell } from 'recharts';
@@ -52,12 +53,13 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
   // Autocomplete State
   const [showItemSuggestions, setShowItemSuggestions] = useState(false);
   const [showSupplierSuggestions, setShowSupplierSuggestions] = useState(false);
+  const [showMobileSelector, setShowMobileSelector] = useState(false); // Mobile UI State
 
   // Derived Lists
   const uniqueProjects = Array.from(new Set(purchases.map(p => p.projectName))).sort();
   const uniqueTypes = Array.from(new Set(purchases.map(p => p.type))).sort();
   
-  // Lists for Auto-Complete Suggestions
+  // Lists for Auto-Complete Suggestions (with type predicates to ensure string[])
   const uniqueSuppliers = Array.from(new Set(purchases.map(p => p.supplier))).filter((s): s is string => !!s).sort();
   const uniqueItemNames = Array.from(new Set(purchases.map(p => p.itemDescription))).filter((i): i is string => !!i).sort();
   
@@ -92,8 +94,8 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
       // Sorting Logic
       if (sortConfig) {
           result.sort((a, b) => {
-              let valA = a[sortConfig.key];
-              let valB = b[sortConfig.key];
+              let valA = a[sortConfig.key] ?? '';
+              let valB = b[sortConfig.key] ?? '';
 
               // Handle string case insensitivity
               if (typeof valA === 'string') valA = valA.toLowerCase();
@@ -433,8 +435,8 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
   const stats = useMemo(() => {
       const totalSpend = filteredPurchases.reduce((acc, p) => acc + p.totalCost, 0);
       const avgTicket = totalSpend / filteredPurchases.length || 0;
-      const uniqueSuppliers = new Set(filteredPurchases.map(p => p.supplier)).size;
-      return { totalSpend, avgTicket, uniqueSuppliers };
+      const uniqueSuppliersSet = new Set(filteredPurchases.map(p => p.supplier));
+      return { totalSpend, avgTicket, uniqueSuppliers: uniqueSuppliersSet.size };
   }, [filteredPurchases]);
 
   // 4. Best Buy Recommendation
@@ -637,9 +639,22 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                     </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
-                    {/* LEFT COLUMN: Item Selection & Details */}
-                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden lg:h-[calc(100vh-350px)]">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 relative">
+                    {/* MOBILE SELECTOR TRIGGER */}
+                    <div className="lg:hidden col-span-1">
+                        <button 
+                            onClick={() => setShowMobileSelector(true)}
+                            className="w-full bg-blue-600 text-white p-4 rounded-xl shadow-lg flex items-center justify-between font-bold"
+                        >
+                            <span className="truncate flex-1 text-left">
+                                {selectedItem ? `Analyzing: ${selectedItem}` : 'Select Material to Analyze'}
+                            </span>
+                            <ArrowRight className="w-5 h-5 ml-2" />
+                        </button>
+                    </div>
+
+                    {/* DESKTOP LEFT COLUMN: Item Selection */}
+                    <div className="hidden lg:flex bg-white rounded-xl shadow-sm border border-slate-200 flex-col overflow-hidden h-[calc(100vh-350px)]">
                         <div className="p-4 border-b border-slate-100 bg-slate-50">
                             <h3 className="font-bold text-slate-800 text-sm uppercase flex items-center gap-2">
                                 <ShoppingCart className="w-4 h-4" /> Purchased Items
@@ -661,19 +676,64 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                         </div>
                     </div>
 
+                    {/* MOBILE DRAWER: Item Selection */}
+                    {showMobileSelector && (
+                        <div className="fixed inset-0 z-50 bg-white flex flex-col animate-in slide-in-from-bottom-full duration-300">
+                            <div className="p-4 bg-slate-900 text-white flex justify-between items-center">
+                                <h3 className="font-bold">Select Material</h3>
+                                <button onClick={() => setShowMobileSelector(false)}><X className="w-6 h-6" /></button>
+                            </div>
+                            <div className="p-4 border-b border-slate-200">
+                                <input 
+                                    className="w-full bg-slate-100 p-3 rounded-lg outline-none text-slate-900" 
+                                    placeholder="Filter list..."
+                                    onChange={(e) => setSearchTerm(e.target.value)} // Reusing search term for list filtering
+                                />
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-2">
+                                {itemFrequency.map(([itemName, count]) => (
+                                    <button
+                                        key={itemName}
+                                        onClick={() => { setSelectedItem(itemName); setShowMobileSelector(false); }}
+                                        className={`w-full text-left px-4 py-4 border-b border-slate-100 text-sm flex justify-between items-center ${
+                                            selectedItem === itemName ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700'
+                                        }`}
+                                    >
+                                        <span className="truncate mr-2">{itemName}</span>
+                                        <span className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-500">{count}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     {/* CENTER/RIGHT COLUMN: Visuals */}
-                    <div className="lg:col-span-2 space-y-6 overflow-y-auto custom-scrollbar lg:h-[calc(100vh-350px)]">
+                    <div className="lg:col-span-2 space-y-6 overflow-y-auto custom-scrollbar lg:h-[calc(100vh-350px)] pb-20 lg:pb-0">
                         
+                        {/* Horizontal Scroll Stats for Mobile */}
+                        <div className="flex lg:hidden overflow-x-auto gap-4 pb-2 snap-x">
+                            <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm min-w-[160px] snap-center">
+                                <p className="text-xs text-slate-500 font-bold uppercase mb-1">Avg Price</p>
+                                <p className="text-xl font-bold text-slate-900 tabular-nums">
+                                    ${(supplierComparisonData.reduce((acc, s) => acc + s.avgPrice, 0) / (supplierComparisonData.length || 1)).toFixed(2)}
+                                </p>
+                            </div>
+                            <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm min-w-[160px] snap-center">
+                                <p className="text-xs text-slate-500 font-bold uppercase mb-1">Purchases</p>
+                                <p className="text-xl font-bold text-slate-900 tabular-nums">{priceHistoryData.length}</p>
+                            </div>
+                        </div>
+
                         {/* Price Trend Chart */}
                         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                            <div className="flex justify-between items-start mb-6">
+                            <div className="flex flex-col sm:flex-row justify-between items-start mb-6 gap-4">
                                 <div>
-                                    <h3 className="font-bold text-slate-900 text-lg">{selectedItem}</h3>
+                                    <h3 className="font-bold text-slate-900 text-lg leading-tight">{selectedItem}</h3>
                                     <p className="text-sm text-slate-500">Unit Cost History</p>
                                 </div>
                                 {bestBuy && (
-                                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2 rounded-lg flex items-center gap-3">
-                                        <div className="p-1.5 bg-emerald-100 rounded-full">
+                                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2 rounded-lg flex items-center gap-3 w-full sm:w-auto">
+                                        <div className="p-1.5 bg-emerald-100 rounded-full shrink-0">
                                             <Award className="w-5 h-5 text-emerald-600" />
                                         </div>
                                         <div>
@@ -688,8 +748,8 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                                 <ResponsiveContainer width="100%" height="100%">
                                     <ComposedChart data={priceHistoryData}>
                                         <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                                        <XAxis dataKey="date" tick={{fontSize: 12}} />
-                                        <YAxis tickFormatter={(val) => `$${val}`} tick={{fontSize: 12}} />
+                                        <XAxis dataKey="date" tick={{fontSize: 10}} />
+                                        <YAxis tickFormatter={(val) => `$${val}`} tick={{fontSize: 10}} width={40} />
                                         <Tooltip 
                                             content={({ active, payload, label }) => {
                                                 if (active && payload && payload.length) {
@@ -721,13 +781,13 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                                 <ResponsiveContainer width="100%" height="100%">
                                     <BarChart data={supplierComparisonData} layout="vertical">
                                         <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
-                                        <XAxis type="number" tickFormatter={(val) => `$${val}`} />
-                                        <YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12, fontWeight: 500}} />
+                                        <XAxis type="number" tickFormatter={(val) => `$${val}`} tick={{fontSize: 10}} />
+                                        <YAxis dataKey="name" type="category" width={80} tick={{fontSize: 10, fontWeight: 500}} />
                                         <Tooltip 
                                             cursor={{fill: '#f8fafc'}}
                                             formatter={(value: number) => [`$${value.toFixed(2)}`, 'Avg Price']}
                                         />
-                                        <Bar dataKey="avgPrice" radius={[0, 4, 4, 0]} barSize={32}>
+                                        <Bar dataKey="avgPrice" radius={[0, 4, 4, 0]} barSize={24}>
                                             {supplierComparisonData.map((entry, index) => (
                                                 <Cell key={`cell-${index}`} fill={index === 0 ? '#10b981' : '#64748b'} />
                                             ))}
