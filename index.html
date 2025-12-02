@@ -62,23 +62,25 @@
   <script type="importmap">
 {
   "imports": {
+    "jspdf": "https://aistudiocdn.com/jspdf@^3.0.4",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
     "react": "https://aistudiocdn.com/react@^19.2.0",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
     "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
-    "recharts": "https://aistudiocdn.com/recharts@^3.5.0",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-latest/package/xlsx.mjs",
-    "@azure/msal-browser": "https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.10.0/dist/index.mjs",
-    "@azure/msal-common": "https://cdn.jsdelivr.net/npm/@azure/msal-common@14.7.1/dist/index.mjs",
-    "jspdf": "https://aistudiocdn.com/jspdf@^2.5.1",
-    "jspdf-autotable": "https://aistudiocdn.com/jspdf-autotable@^3.8.2"
+    "vite": "https://aistudiocdn.com/vite@^7.2.6",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0",
+    "recharts": "https://aistudiocdn.com/recharts@^3.5.1",
+    "jspdf-autotable": "https://aistudiocdn.com/jspdf-autotable@^5.0.2",
+    "xlsx": "https://aistudiocdn.com/xlsx@^0.18.5",
+    "@azure/msal-browser": "https://aistudiocdn.com/@azure/msal-browser@^4.26.2"
   }
 }
 </script>
 </head>
   <body class="bg-slate-50 text-slate-900 antialiased">
     <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
