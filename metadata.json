@@ -1,5 +1,5 @@
 {
-  "name": "Carsan Electric Estimator",
+  "name": "Carsan Electric app",
   "description": "Professional electrical estimating application for Miami residential and commercial projects using Gemini AI for blueprint analysis and dynamic pricing databases.",
   "requestFramePermissions": [
     "microphone",
