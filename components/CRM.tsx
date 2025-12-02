@@ -724,7 +724,7 @@ export const CRM: React.FC<CRMProps> = ({ user, projects = [], leads, setLeads, 
                                     placeholder="e.g. 555y1dg..."
                                     className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
                                   />
-                                  <p className="text-[10px] text-slate-400 mt-1">Found in Overview > Directory (tenant) ID. Required for Single-Tenant apps.</p>
+                                  <p className="text-[10px] text-slate-400 mt-1">Found in Overview &gt; Directory (tenant) ID. Required for Single-Tenant apps.</p>
                               </div>
                           </div>
                           <div className="mt-4 flex justify-end">

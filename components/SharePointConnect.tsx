@@ -225,7 +225,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                                 placeholder="e.g. 555y1dg-..."
                                 className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
                                 />
-                                <p className="text-[10px] text-slate-400 mt-1">Found in Azure Portal > Overview. Required to fix AADSTS50194.</p>
+                                <p className="text-[10px] text-slate-400 mt-1">Found in Azure Portal &gt; Overview. Required to fix AADSTS50194.</p>
                             </div>
                             <div>
                                 <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Client ID</label>
