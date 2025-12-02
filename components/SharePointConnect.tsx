@@ -201,8 +201,8 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
 
                         <div className="bg-white border-2 border-blue-100 p-4 rounded-lg mb-6 shadow-sm">
                             <div className="flex items-center justify-between mb-2">
-                                <label className="text-xs font-bold text-blue-800 uppercase">Current App URL (Add to Azure)</label>
-                                <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-bold">DYNAMIC</span>
+                                <label className="text-xs font-bold text-blue-800 uppercase">Current App URL</label>
+                                <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-bold">ADD TO AZURE</span>
                             </div>
                             <div className="flex items-center gap-2 font-mono text-slate-700 break-all text-xs bg-slate-50 p-2 rounded border border-slate-200">
                                 <span className="flex-1">{window.location.origin}</span>
@@ -211,8 +211,9 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                                 </button>
                             </div>
                             <p className="text-[10px] text-slate-500 mt-2 leading-relaxed">
-                                <strong>Why does this keep changing?</strong> You are in a cloud coding environment. Each time the server restarts, this URL changes. 
-                                <br/>To fix this permanently, <strong>Publish/Deploy</strong> your app to Vercel or Netlify to get a static URL.
+                                <strong>Vercel Users:</strong> You are currently on a specific deployment URL. 
+                                <br/>• If this is for testing, add this URL to Azure Portal &gt; Authentication &gt; Redirect URIs.
+                                <br/>• For production, use your main domain (e.g., carsan-app.vercel.app) to avoid changing this constantly.
                             </p>
                         </div>
 

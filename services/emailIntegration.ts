@@ -39,6 +39,7 @@ const initializeMsal = async () => {
     }
 
     if (!msalInstance) {
+        console.log("Initializing MSAL with Redirect URI:", window.location.origin);
         msalInstance = new PublicClientApplication({
             auth: {
                 clientId: clientId,
