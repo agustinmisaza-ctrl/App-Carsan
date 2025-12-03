@@ -31,7 +31,7 @@ const loadState = <T,>(key: string, fallback: T): T => {
 export const App: React.FC = () => {
     // Log Version for debugging
     useEffect(() => {
-        console.log("Carsan Estimator v1.4 Loaded - Production Build");
+        console.log("Carsan Estimator v1.7 Loaded - Production Build Fix");
     }, []);
 
     const [user, setUser] = useState<User | null>(null);
