@@ -1,551 +1,435 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Cloud, Check, Loader2, Database, AlertTriangle, RefreshCw, Globe, ChevronRight, Settings, Save, Copy, LogOut, ShieldAlert, FileSpreadsheet, Upload } from 'lucide-react';
-import { searchSharePointSites, ensureCarsanLists, addListItem, getSharePointLists, getListItems, updateListItem, SPSite } from '../services/sharepointService';
-import { ProjectEstimate, MaterialItem } from '../types';
-import { getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId, signOut, getGraphToken } from '../services/emailIntegration';
+import React, { useState } from 'react';
+import { ProjectEstimate, MaterialItem, ServiceTicket } from '../types';
+import { searchSharePointSites, ensureCarsanLists, getSharePointLists, addListItem, updateListItem, getListItems } from '../services/sharepointService';
+import { Cloud, Search, Database, Check, Loader2, AlertTriangle, RefreshCw, Upload, FileSpreadsheet, LogOut, Settings } from 'lucide-react';
+import { getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId, signOut } from '../services/emailIntegration';
 import * as XLSX from 'xlsx';
 
 interface SharePointConnectProps {
     projects: ProjectEstimate[];
     materials: MaterialItem[];
-    setProjects: (p: ProjectEstimate[]) => void;
-    setMaterials: (m: MaterialItem[]) => void;
+    tickets: ServiceTicket[];
 }
 
-export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, materials, setProjects, setMaterials }) => {
-    const [step, setStep] = useState<1 | 2 | 3>(1);
-    const [sites, setSites] = useState<SPSite[]>([]);
-    const [selectedSite, setSelectedSite] = useState<SPSite | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [status, setStatus] = useState<string>('');
-    const [dbInitialized, setDbInitialized] = useState(false);
+export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, materials, tickets }) => {
+    const [step, setStep] = useState<'config' | 'search' | 'sync'>('search');
+    const [sites, setSites] = useState<any[]>([]);
+    const [selectedSite, setSelectedSite] = useState<any>(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [status, setStatus] = useState('');
+    const [error, setError] = useState<string | null>(null);
+    const [rawError, setRawError] = useState<any>(null);
 
     // Config State
-    const [showConfig, setShowConfig] = useState(false);
-    const [tenantId, setTenantId] = useState('');
-    const [clientId, setClientId] = useState('');
-    const [configError, setConfigError] = useState<string | null>(null);
-    const [permissionError, setPermissionError] = useState(false);
-    const [rawError, setRawError] = useState<string>('');
-    const [copied, setCopied] = useState(false);
-
-    const excelInputRef = useRef<HTMLInputElement>(null);
-
-    useEffect(() => {
-        setTenantId(getStoredTenantId() || '');
-        setClientId(getStoredClientId() || '');
-    }, []);
-
-    const handleCopyUrl = () => {
-        navigator.clipboard.writeText(window.location.origin);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-    };
-
-    const handleSaveConfig = () => {
-        if (!tenantId.trim()) {
-            setConfigError("Tenant ID is required.");
-            return;
-        }
-        setStoredTenantId(tenantId.trim());
-        if (clientId.trim()) setStoredClientId(clientId.trim());
-        setConfigError(null);
-        setShowConfig(false);
-        alert("Configuration saved. Retrying connection...");
-        handleSearchSites();
-    };
-
-    const handleResetSession = async () => {
-        await signOut();
-        window.location.reload();
-    };
-
-    const handleForceRepair = async () => {
-        try {
-            // Force an interactive login specifically for SharePoint scopes
-            await getGraphToken(['Sites.ReadWrite.All', 'Sites.Manage.All'], true);
-            setPermissionError(false);
-            setRawError('');
-            alert("Permissions refreshed! Please try 'Initialize Database' again.");
-        } catch (e: any) {
-            console.error(e);
-            alert(`Repair failed: ${e.message}`);
-        }
-    };
+    const [tenantId, setTenantId] = useState(getStoredTenantId() || '');
+    const [clientId, setClientId] = useState(getStoredClientId() || '');
 
     const handleSearchSites = async () => {
-        setLoading(true);
-        setConfigError(null);
-        setPermissionError(false);
+        setIsLoading(true);
+        setError(null);
+        setRawError(null);
         try {
             const results = await searchSharePointSites("");
             setSites(results);
-            setStep(2);
-            setShowConfig(false);
+            if (results.length === 0) setStatus("No sites found. Check permissions.");
         } catch (e: any) {
             console.error(e);
-            const errStr = String(e).toLowerCase();
-            
-            if (errStr.includes("user_cancelled") || errStr.includes("interaction_in_progress")) {
-                console.log("Connection cancelled by user.");
-                return;
-            }
-
-            if (errStr.includes("aadsts50194") || errStr.includes("single-tenant") || errStr.includes("tenant-specific")) {
-                setConfigError("Authentication Error: Single-Tenant App requires Tenant ID.");
-                setShowConfig(true);
-            } else if (errStr.includes("aadsts50011")) {
-                setConfigError(`Redirect URI Mismatch.`);
-                setShowConfig(true);
+            if (String(e).includes("AADSTS50194") || String(e).includes("Tenant ID")) {
+                setStep('config');
+                setError("Configuration Required: Please enter your Azure Tenant ID.");
+            } else if (String(e).includes("AADSTS50011")) {
+                setStep('config');
+                setError("Redirect URI Mismatch. Please check the URL in Azure.");
             } else {
-                alert("Connection Failed. Check console for details.");
+                setError("Failed to search sites. " + e.message);
+                setRawError(e);
             }
         } finally {
-            setLoading(false);
+            setIsLoading(false);
         }
     };
 
-    const handleSelectSite = async (site: SPSite) => {
-        setSelectedSite(site);
-        // Check if DB exists
-        setLoading(true);
-        try {
-            const lists = await getSharePointLists(site.id);
-            const hasProjectList = lists.some(l => l.displayName === 'Carsan_Projects');
-            setDbInitialized(hasProjectList);
-            setStep(3);
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleInitializeDB = async () => {
+    const handleInitialize = async (forceNewToken = false) => {
         if (!selectedSite) return;
-        setLoading(true);
-        setStatus('Creating SharePoint Lists...');
-        setPermissionError(false);
-        setRawError('');
-        
+        setIsLoading(true);
+        setStatus("Initializing Database Lists...");
+        setError(null);
+        setRawError(null);
         try {
-            // Pass TRUE to force a fresh token from Microsoft, ignoring cache
-            await ensureCarsanLists(selectedSite.id, true);
-            setDbInitialized(true);
-            setStatus('Database Created!');
+            await ensureCarsanLists(selectedSite.id, forceNewToken);
+            setStatus("Database Ready! Lists 'Carsan_Projects' and 'Carsan_Materials' verified.");
+            setStep('sync');
         } catch (e: any) {
-            setStatus('Error creating lists.');
-            setRawError(e.message || JSON.stringify(e));
-            console.error("FULL INIT ERROR:", e); // Debug logging
-            
-            if (e.message.includes('Sites.ReadWrite.All') || e.message.includes('Access Denied') || e.message.includes('403')) {
-                setPermissionError(true);
-            } else {
-                alert(e.message || "Failed to create lists. Check console.");
-            }
+            console.error("Init Error", e);
+            setStatus("Error creating lists.");
+            setError(e.message || "Access Denied. Check permissions.");
+            setRawError(e);
         } finally {
-            setLoading(false);
+            setIsLoading(false);
         }
     };
 
-    // Updated Sync Logic with Batching to prevent UI Freeze
+    const handleSaveConfig = () => {
+        setStoredTenantId(tenantId.trim());
+        setStoredClientId(clientId.trim());
+        setStep('search');
+        handleSearchSites();
+    };
+
     const handleSyncUp = async () => {
         if (!selectedSite) return;
-        if (!confirm("This will overwrite SharePoint data with your local data. Continue?")) return;
-        
-        setLoading(true);
-        setStatus('Connecting...');
+        setIsLoading(true);
+        setStatus("Finding target lists...");
         
         try {
             const lists = await getSharePointLists(selectedSite.id);
-            const projList = lists.find(l => l.displayName === 'Carsan_Projects');
+            const projectList = lists.find((l: any) => l.displayName === 'Carsan_Projects');
             
-            if (projList) {
-                const chunkSize = 5; // Batch size
-                for (let i = 0; i < projects.length; i += chunkSize) {
-                    const chunk = projects.slice(i, i + chunkSize);
-                    setStatus(`Syncing batch ${Math.min(i + chunkSize, projects.length)} of ${projects.length}...`);
-                    
-                    // Upload batch in parallel
-                    await Promise.all(chunk.map(p => addListItem(selectedSite.id, projList.id, {
-                        Title: p.name,
-                        Client: p.client,
-                        Status: p.status,
-                        Value: p.contractValue || 0,
-                        JSON_Data: JSON.stringify(p)
-                    })));
-                    
-                    // Small delay to let UI breathe
-                    await new Promise(r => setTimeout(r, 100));
-                }
+            if (!projectList) throw new Error("Project List not found. Initialize Database first.");
+
+            setStatus(`Syncing ${projects.length} projects...`);
+            
+            // Batch processing to avoid UI freeze
+            const chunkSize = 5;
+            let successCount = 0;
+            let failCount = 0;
+
+            for (let i = 0; i < projects.length; i += chunkSize) {
+                const chunk = projects.slice(i, i + chunkSize);
+                
+                await Promise.all(chunk.map(async (p) => {
+                    try {
+                        await addListItem(selectedSite.id, projectList.id, {
+                            Title: p.name,
+                            Client: p.client,
+                            Status: p.status,
+                            Value: p.contractValue || 0,
+                            ADDRESS: p.address || '',
+                            Estimator: p.estimator || '',
+                            'Delivery Date': p.deliveryDate || null,
+                            'Expiration Date': p.expirationDate || null,
+                            'Awarded Date': p.awardedDate || null,
+                            JSON_Data: JSON.stringify(p)
+                        });
+                        successCount++;
+                    } catch (err) {
+                        console.error("Failed to upload project", p.name, err);
+                        failCount++;
+                    }
+                }));
+                
+                setStatus(`Syncing... ${Math.min(i + chunkSize, projects.length)}/${projects.length} (Failed: ${failCount})`);
+                // Small delay to prevent rate limiting
+                await new Promise(resolve => setTimeout(resolve, 500));
             }
-            setStatus('Sync Complete!');
-        } catch (e) {
-            setStatus('Sync Failed.');
-            console.error(e);
+
+            setStatus(`Sync Complete! Uploaded: ${successCount}, Failed: ${failCount}`);
+        } catch (e: any) {
+            setError(e.message);
         } finally {
-            setLoading(false);
+            setIsLoading(false);
         }
     };
 
-    // New Function: Upload Excel File Directly to Cloud
     const handleExcelToCloud = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file || !selectedSite) return;
 
-        setLoading(true);
-        setStatus('Reading Excel File...');
+        setIsLoading(true);
+        setStatus("Reading Excel file...");
 
         const reader = new FileReader();
         reader.onload = async (event) => {
             try {
                 const data = event.target?.result;
                 const workbook = XLSX.read(data, { type: 'array' });
-                const sheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[sheetName];
+                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
                 const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
-                if (!Array.isArray(jsonData) || jsonData.length === 0) {
-                    alert("No data found in Excel file.");
-                    setLoading(false);
-                    return;
-                }
-
                 const lists = await getSharePointLists(selectedSite.id);
-                const projList = lists.find(l => l.displayName === 'Carsan_Projects');
+                const projectList = lists.find((l: any) => l.displayName === 'Carsan_Projects');
+                
+                if (!projectList) throw new Error("List 'Carsan_Projects' not found.");
 
-                if (!projList) {
-                    alert("Project List not found on SharePoint. Initialize Database first.");
-                    setLoading(false);
-                    return;
-                }
+                let successCount = 0;
+                let failCount = 0;
+                const total = jsonData.length;
 
-                // Helper to safely find values in messy excel headers
-                const findVal = (row: any, keys: string[]) => {
-                    const rowKeys = Object.keys(row);
-                    for (const key of keys) {
-                        const foundKey = rowKeys.find(k => k.toLowerCase().trim() === key.toLowerCase().trim());
-                        if (foundKey && row[foundKey] !== undefined) return row[foundKey];
-                    }
-                    return undefined;
-                };
+                setStatus(`Uploading ${total} rows...`);
 
-                const chunkSize = 5;
-                for (let i = 0; i < jsonData.length; i += chunkSize) {
-                    const chunk = jsonData.slice(i, i + chunkSize);
-                    setStatus(`Uploading Excel row ${Math.min(i + chunkSize, jsonData.length)} of ${jsonData.length}...`);
+                // Process sequentially to be safe with rate limits
+                for (let i = 0; i < total; i++) {
+                    const row: any = jsonData[i];
+                    
+                    // Column Mapping logic
+                    const findVal = (keys: string[]) => {
+                        for (const key of keys) if (row[key] !== undefined) return row[key];
+                        return undefined;
+                    };
 
-                    await Promise.all(chunk.map(async (row: any, idx: number) => {
-                        const name = findVal(row, ['Project Name', 'Project', 'Title']) || `Imported Project ${i + idx}`;
-                        const client = findVal(row, ['Client', 'Customer']) || 'Unknown';
-                        const status = findVal(row, ['Status', 'Stage']) || 'Draft';
-                        const value = Number(findVal(row, ['Value', 'Amount', 'Total'])) || 0;
-                        const address = findVal(row, ['Address', 'Location']) || 'Miami, FL';
-                        
-                        // Construct the full project object to store in JSON_Data
-                        const fullProjectObj: ProjectEstimate = {
-                            id: `excel-imp-${Date.now()}-${i}-${idx}`,
-                            name,
-                            client,
-                            status: status as any,
-                            contractValue: value,
-                            address,
-                            dateCreated: new Date().toISOString(),
-                            laborRate: 75,
-                            items: []
-                        };
+                    const name = findVal(['Project Name', 'Title', 'Project']) || 'Untitled';
+                    const client = findVal(['Client', 'Customer']) || 'Unknown';
+                    const value = findVal(['Value', 'Amount', 'Total']) || 0;
+                    const statusVal = findVal(['Status']) || 'Draft';
+                    const address = findVal(['Address', 'Location', 'Site']) || '';
+                    const estimator = findVal(['Estimator', 'Owner']) || '';
+                    
+                    // Date Parsing
+                    const parseExcelDate = (val: any) => {
+                        if (!val) return null;
+                        if (typeof val === 'number') return new Date(Math.round((val - 25569)*86400*1000)).toISOString();
+                        const d = new Date(val);
+                        return !isNaN(d.getTime()) ? d.toISOString() : null;
+                    };
 
-                        await addListItem(selectedSite.id, projList.id, {
+                    const deliveryDate = parseExcelDate(findVal(['Delivery Date', 'Due Date']));
+                    const expirationDate = parseExcelDate(findVal(['Expiration Date', 'Valid Until']));
+                    const awardedDate = parseExcelDate(findVal(['Awarded Date', 'Start Date']));
+
+                    try {
+                        await addListItem(selectedSite.id, projectList.id, {
                             Title: name,
                             Client: client,
-                            Status: status,
-                            Value: value,
-                            JSON_Data: JSON.stringify(fullProjectObj)
+                            Status: statusVal,
+                            Value: Number(value),
+                            ADDRESS: address,
+                            Estimator: estimator,
+                            'Delivery Date': deliveryDate,
+                            'Expiration Date': expirationDate,
+                            'Awarded Date': awardedDate,
+                            JSON_Data: JSON.stringify(row) // Backup full row data
                         });
-                    }));
-                    await new Promise(r => setTimeout(r, 100));
+                        successCount++;
+                    } catch (err: any) {
+                        console.error(`Failed row ${i+1}:`, err);
+                        failCount++;
+                        setError(`Row ${i+1} Error: ${err.message}`); // Show last error
+                    }
+
+                    if (i % 5 === 0) {
+                        setStatus(`Uploading row ${i + 1} of ${total}...`);
+                        await new Promise(resolve => setTimeout(resolve, 300)); // Throttle
+                    }
                 }
 
-                setStatus(`Successfully imported ${jsonData.length} projects to Cloud!`);
-                
-            } catch (err) {
-                console.error(err);
-                setStatus("Import Failed. Check console.");
-                alert("Failed to process Excel file.");
+                alert(`Import Complete!\nUploaded: ${successCount}\nFailed: ${failCount}`);
+                setStatus(`Finished. Success: ${successCount}, Fail: ${failCount}`);
+
+            } catch (err: any) {
+                setError("Excel processing failed: " + err.message);
             } finally {
-                setLoading(false);
-                if (excelInputRef.current) excelInputRef.current.value = '';
+                setIsLoading(false);
+                if (e.target) e.target.value = '';
             }
         };
         reader.readAsArrayBuffer(file);
     };
 
-    const handleSyncDown = async () => {
-        if (!selectedSite) return;
-        setLoading(true);
-        setStatus('Pulling from Cloud...');
-        try {
-            const lists = await getSharePointLists(selectedSite.id);
-            const projList = lists.find(l => l.displayName === 'Carsan_Projects');
-            
-            if (projList) {
-                const items = await getListItems(selectedSite.id, projList.id);
-                const cloudProjects = items.map(i => {
-                    try {
-                        return JSON.parse(i.fields.JSON_Data);
-                    } catch { return null; }
-                }).filter(Boolean);
-                
-                if (cloudProjects.length > 0) {
-                    setProjects(cloudProjects);
-                    setStatus(`Downloaded ${cloudProjects.length} projects.`);
-                } else {
-                    setStatus('No projects found in cloud.');
-                }
-            }
-        } catch (e) {
-            setStatus('Download Failed.');
-        } finally {
-            setLoading(false);
-        }
+    const handleLogout = async () => {
+        await signOut();
+        window.location.reload();
     };
 
     return (
-        <div className="p-8 max-w-4xl mx-auto">
-            <h1 className="text-3xl font-bold text-slate-900 mb-2 flex items-center gap-2">
-                <Cloud className="w-8 h-8 text-blue-600" /> Cloud Database
-            </h1>
-            <p className="text-slate-500 mb-8">Connect your SharePoint Team Site to share data with your estimators.</p>
+        <div className="p-4 md:p-8 max-w-4xl mx-auto space-y-6">
+            
+            {/* --- CONFIGURATION STEP --- */}
+            {step === 'config' && (
+                <div className="bg-white p-8 rounded-xl shadow-lg border border-slate-200">
+                    <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
+                        <Settings className="w-6 h-6 text-slate-700" /> Configuration
+                    </h2>
+                    
+                    <div className="bg-blue-50 p-4 rounded-lg mb-6 text-sm text-blue-800">
+                        <p className="font-bold mb-1">Vercel Deployment Detected</p>
+                        <p>Your redirect URI changes with every deployment preview. <br/>
+                        <strong>Current Redirect URI:</strong> <code className="bg-white px-1 py-0.5 rounded border">{window.location.origin}</code>
+                        </p>
+                        <p className="mt-2 text-xs">If you see error <strong>AADSTS50011</strong>, copy the URI above and add it to your Azure App Registration.</p>
+                    </div>
 
-            <div className="bg-white rounded-xl shadow border border-slate-200 p-6">
-                
-                {/* CONFIGURATION PANEL */}
-                {showConfig && (
-                    <div className="mb-8 bg-slate-50 border border-slate-200 rounded-xl p-5 animate-in slide-in-from-top-2">
-                        <h4 className="font-bold text-slate-800 text-sm mb-3 flex items-center gap-2">
-                            <Settings className="w-4 h-4" /> Connection Settings
-                        </h4>
-                        
-                        {configError && (
-                            <div className="bg-red-50 border border-red-200 p-3 rounded-lg mb-4 text-red-700 text-xs font-bold shadow-sm">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <AlertTriangle className="w-5 h-5" /> 
-                                    {configError}
-                                </div>
-                            </div>
-                        )}
-
-                        <div className="bg-white border-2 border-blue-100 p-4 rounded-lg mb-6 shadow-sm">
-                            <div className="flex items-center justify-between mb-2">
-                                <label className="text-xs font-bold text-blue-800 uppercase">Current App URL</label>
-                                <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-bold">ADD TO AZURE</span>
-                            </div>
-                            <div className="flex items-center gap-2 font-mono text-slate-700 break-all text-xs bg-slate-50 p-2 rounded border border-slate-200">
-                                <span className="flex-1">{window.location.origin}</span>
-                                <button onClick={handleCopyUrl} className="text-blue-600 hover:text-blue-800 shrink-0 font-bold">
-                                    {copied ? "COPIED" : "COPY"}
-                                </button>
-                            </div>
-                            <p className="text-[10px] text-slate-500 mt-2 leading-relaxed">
-                                <strong>Vercel Users:</strong> You are currently on a specific deployment URL. 
-                                <br/>• If this is for testing, add this URL to Azure Portal &gt; Authentication &gt; Redirect URIs.
-                                <br/>• For production, use your main domain (e.g., carsan-app.vercel.app) to avoid changing this constantly.
-                            </p>
-                        </div>
-
-                        <div className="space-y-4">
-                            <div>
-                                <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Azure Tenant ID (Required)</label>
-                                <input 
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-bold text-slate-700 mb-1">Azure Tenant ID</label>
+                            <input 
                                 value={tenantId}
                                 onChange={(e) => setTenantId(e.target.value)}
-                                placeholder="e.g. 555y1dg-..."
-                                className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                                />
-                                <p className="text-[10px] text-slate-400 mt-1">Found in Azure Portal &gt; Overview. Required to fix AADSTS50194.</p>
-                            </div>
-                            <div>
-                                <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Client ID</label>
-                                <input 
+                                className="w-full border border-slate-300 rounded-lg p-3 text-sm"
+                                placeholder="Paste your Tenant ID here"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-slate-700 mb-1">Client ID</label>
+                            <input 
                                 value={clientId}
                                 onChange={(e) => setClientId(e.target.value)}
-                                placeholder="Default used if empty"
-                                className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                                />
-                            </div>
+                                className="w-full border border-slate-300 rounded-lg p-3 text-sm"
+                                placeholder="Paste your Client ID here"
+                            />
                         </div>
-                        <div className="mt-4 flex justify-end gap-2">
-                            <button onClick={() => setShowConfig(false)} className="px-4 py-2 text-slate-600 font-bold text-sm">Cancel</button>
-                            <button 
-                                onClick={handleSaveConfig}
-                                className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-800 flex items-center gap-2"
-                            >
-                                <Save className="w-4 h-4" /> Save & Retry
-                            </button>
-                        </div>
+                        <button 
+                            onClick={handleSaveConfig}
+                            className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition"
+                        >
+                            Save & Continue
+                        </button>
                     </div>
-                )}
+                </div>
+            )}
 
-                {step === 1 && !showConfig && (
-                    <div className="text-center py-8">
-                        <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <Globe className="w-8 h-8" />
-                        </div>
-                        <h3 className="text-xl font-bold text-slate-900 mb-2">Connect to Microsoft 365</h3>
-                        <p className="text-slate-500 mb-6">We will search for your available SharePoint Sites.</p>
-                        
-                        <div className="flex justify-center gap-3">
-                            <button 
-                                onClick={() => setShowConfig(true)} 
-                                className="px-4 py-3 border border-slate-200 rounded-lg text-slate-600 font-bold hover:bg-slate-50 flex items-center gap-2"
-                            >
-                                <Settings className="w-4 h-4" /> Config
-                            </button>
-                            <button 
-                                onClick={handleSearchSites} 
-                                disabled={loading}
-                                className="bg-blue-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-                            >
-                                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Database className="w-5 h-5" />}
-                                Find Sites
-                            </button>
-                        </div>
+            {/* --- SITE SEARCH STEP --- */}
+            {step === 'search' && (
+                <div className="bg-white p-8 rounded-xl shadow-lg border border-slate-200 text-center">
+                    <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Cloud className="w-8 h-8" />
                     </div>
-                )}
-
-                {step === 2 && !showConfig && (
-                    <div>
-                        <h3 className="font-bold text-slate-800 mb-4">Select Database Site</h3>
-                        <div className="space-y-2 max-h-96 overflow-y-auto">
-                            {sites.map(site => (
-                                <button 
-                                    key={site.id} 
-                                    onClick={() => handleSelectSite(site)}
-                                    className="w-full text-left p-4 rounded-lg border border-slate-200 hover:border-blue-500 hover:bg-blue-50 transition flex justify-between items-center group"
-                                >
-                                    <span className="font-medium text-slate-700">{site.displayName}</span>
-                                    <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-blue-500" />
-                                </button>
-                            ))}
+                    <h2 className="text-2xl font-bold text-slate-900">Connect SharePoint</h2>
+                    <p className="text-slate-500 mt-2 mb-8">Select your team site to enable cloud features.</p>
+                    
+                    {isLoading ? (
+                        <div className="flex flex-col items-center">
+                            <Loader2 className="w-8 h-8 animate-spin text-blue-600 mb-2" />
+                            <span className="text-sm text-slate-500">Searching sites...</span>
                         </div>
-                    </div>
-                )}
-
-                {step === 3 && selectedSite && (
-                    <div className="space-y-6">
-                        <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg border border-slate-200">
-                            <div>
-                                <p className="text-xs font-bold text-slate-500 uppercase">Connected To</p>
-                                <p className="text-lg font-bold text-slate-900">{selectedSite.displayName}</p>
-                            </div>
-                            <button onClick={() => setStep(2)} className="text-sm text-blue-600 hover:underline">Change</button>
-                        </div>
-
-                        {!dbInitialized ? (
-                            <div className="bg-amber-50 border border-amber-200 p-6 rounded-xl text-center">
-                                <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto mb-3" />
-                                <h3 className="font-bold text-amber-900">Database Not Found</h3>
-                                <p className="text-amber-700 text-sm mb-4">
-                                    The required lists (Carsan_Projects, Carsan_Materials) do not exist on this site.
-                                </p>
-                                {permissionError && (
-                                    <div className="bg-red-50 border border-red-200 p-4 rounded-lg text-left mb-4">
-                                        <p className="text-red-800 font-bold text-sm mb-2 flex items-center gap-2">
-                                            <ShieldAlert className="w-4 h-4" /> Permission Issue
-                                        </p>
-                                        <p className="text-red-700 text-xs mb-3 leading-relaxed">
-                                            The app cannot create lists. Possible reasons:<br/>
-                                            1. You are a <strong>Visitor</strong> on this SharePoint site (Need 'Edit' access).<br/>
-                                            2. The app's security token is outdated or missing scopes.
-                                        </p>
-                                        <p className="text-[10px] font-mono bg-red-100 p-2 rounded mb-3 break-all">{rawError}</p>
-                                        
-                                        <div className="flex gap-2">
-                                            <button 
-                                                onClick={handleForceRepair}
-                                                className="flex-1 bg-white border border-red-200 text-red-700 py-2 rounded-lg font-bold text-sm hover:bg-red-50 flex items-center justify-center gap-2"
-                                            >
-                                                <RefreshCw className="w-4 h-4" /> Repair Connection
-                                            </button>
-                                            <button 
-                                                onClick={handleResetSession}
-                                                className="flex-1 bg-red-600 text-white py-2 rounded-lg font-bold text-sm hover:bg-red-700 flex items-center justify-center gap-2"
-                                            >
-                                                <LogOut className="w-4 h-4" /> Full Log Out
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-                                <button 
-                                    onClick={handleInitializeDB}
-                                    disabled={loading}
-                                    className="bg-amber-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-amber-700 disabled:opacity-50"
-                                >
-                                    {loading ? 'Creating...' : 'Initialize Database'}
-                                </button>
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="border border-slate-200 rounded-xl p-5 hover:border-blue-300 transition">
-                                    <h4 className="font-bold text-slate-800 mb-2 flex items-center gap-2">
-                                        <Database className="w-4 h-4 text-blue-500" /> Push to Cloud
-                                    </h4>
-                                    <p className="text-xs text-slate-500 mb-4">
-                                        Upload your local projects ({projects.length}) to SharePoint for the team.
-                                    </p>
-                                    <div className="space-y-2">
+                    ) : (
+                        <div className="space-y-4">
+                            {sites.length > 0 ? (
+                                <div className="grid gap-3 text-left">
+                                    {sites.map(site => (
                                         <button 
-                                            onClick={handleSyncUp}
-                                            disabled={loading}
-                                            className="w-full bg-slate-900 text-white py-2 rounded-lg text-sm font-bold hover:bg-slate-800 disabled:opacity-50"
+                                            key={site.id}
+                                            onClick={() => setSelectedSite(site)}
+                                            className={`p-4 rounded-xl border transition-all flex items-center justify-between ${selectedSite?.id === site.id ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500/20' : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50'}`}
                                         >
-                                            Upload Local Data
+                                            <span className="font-bold text-slate-800">{site.displayName}</span>
+                                            {selectedSite?.id === site.id && <Check className="w-5 h-5 text-blue-600" />}
                                         </button>
-                                        <div className="relative">
-                                            <input 
-                                                type="file" 
-                                                accept=".xlsx, .xls"
-                                                ref={excelInputRef}
-                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                onChange={handleExcelToCloud}
-                                            />
-                                            <button 
-                                                disabled={loading}
-                                                className="w-full bg-emerald-600 text-white py-2 rounded-lg text-sm font-bold hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2"
-                                            >
-                                                <FileSpreadsheet className="w-4 h-4" /> Import Excel to Cloud
-                                            </button>
-                                        </div>
-                                    </div>
+                                    ))}
                                 </div>
-
-                                <div className="border border-slate-200 rounded-xl p-5 hover:border-blue-300 transition">
-                                    <h4 className="font-bold text-slate-800 mb-2 flex items-center gap-2">
-                                        <RefreshCw className="w-4 h-4 text-green-500" /> Pull from Cloud
-                                    </h4>
-                                    <p className="text-xs text-slate-500 mb-4">
-                                        Download the latest team data. (Overwrites local changes).
-                                    </p>
+                            ) : (
+                                <button 
+                                    onClick={handleSearchSites}
+                                    className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-blue-700 transition shadow-lg"
+                                >
+                                    Search Sites
+                                </button>
+                            )}
+                            
+                            {selectedSite && (
+                                <div className="pt-6 animate-in fade-in">
                                     <button 
-                                        onClick={handleSyncDown}
-                                        disabled={loading}
-                                        className="w-full bg-white border border-slate-300 text-slate-700 py-2 rounded-lg text-sm font-bold hover:bg-slate-50 disabled:opacity-50"
+                                        onClick={() => handleInitialize(false)}
+                                        className="bg-slate-900 text-white px-8 py-3 rounded-xl font-bold hover:bg-slate-800 transition shadow-lg w-full md:w-auto"
                                     >
-                                        Sync Down
+                                        Connect to: {selectedSite.displayName}
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {error && (
+                        <div className="mt-6 bg-red-50 text-red-600 p-4 rounded-xl text-sm text-left border border-red-100">
+                            <p className="font-bold flex items-center gap-2 mb-1">
+                                <AlertTriangle className="w-4 h-4" /> Connection Error
+                            </p>
+                            <p className="font-mono text-xs opacity-90 break-all">{error}</p>
+                            {rawError && (
+                                <pre className="mt-2 text-[10px] bg-white/50 p-2 rounded overflow-auto max-h-20">
+                                    {JSON.stringify(rawError, null, 2)}
+                                </pre>
+                            )}
+                            <div className="mt-3 flex gap-2">
+                                <button onClick={() => setStep('config')} className="text-xs bg-white border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50 font-bold">
+                                    Check Configuration
+                                </button>
+                                <button onClick={handleLogout} className="text-xs bg-red-600 text-white px-3 py-1.5 rounded-lg hover:bg-red-700 font-bold flex items-center gap-1">
+                                    <LogOut className="w-3 h-3" /> Full Sign Out
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* --- SYNC DASHBOARD --- */}
+            {step === 'sync' && selectedSite && (
+                <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+                    <div className="bg-slate-50 p-6 border-b border-slate-200 flex justify-between items-center">
+                        <div>
+                            <p className="text-xs font-bold text-slate-500 uppercase">Connected To</p>
+                            <h2 className="text-xl font-bold text-slate-900">{selectedSite.displayName}</h2>
+                        </div>
+                        <button onClick={() => setStep('search')} className="text-sm text-blue-600 font-medium hover:underline">Change Site</button>
+                    </div>
+
+                    <div className="p-8 grid md:grid-cols-2 gap-8">
+                        {/* Status Card */}
+                        <div className="col-span-2 bg-blue-50 border border-blue-100 p-4 rounded-xl flex items-center gap-4">
+                            <div className="p-3 bg-white rounded-full shadow-sm">
+                                {isLoading ? <Loader2 className="w-6 h-6 text-blue-600 animate-spin" /> : <Database className="w-6 h-6 text-blue-600" />}
+                            </div>
+                            <div>
+                                <p className="text-sm font-bold text-blue-900">Database Status</p>
+                                <p className="text-xs text-blue-700">{status || "Ready to sync."}</p>
+                            </div>
+                        </div>
+
+                        {/* Push Card */}
+                        <div className="border border-slate-200 rounded-xl p-6 hover:shadow-md transition">
+                            <div className="flex items-center gap-3 mb-4">
+                                <Upload className="w-6 h-6 text-indigo-600" />
+                                <h3 className="font-bold text-slate-900">Push to Cloud</h3>
+                            </div>
+                            <p className="text-sm text-slate-500 mb-6 min-h-[40px]">
+                                Upload your local projects to SharePoint.
+                            </p>
+                            <div className="space-y-3">
+                                <button 
+                                    onClick={handleSyncUp}
+                                    disabled={isLoading}
+                                    className="w-full bg-slate-900 text-white py-2.5 rounded-lg font-bold text-sm hover:bg-slate-800 disabled:opacity-50"
+                                >
+                                    Upload App Data
+                                </button>
+                                <div className="relative">
+                                    <input 
+                                        type="file" 
+                                        accept=".xlsx, .xls"
+                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                        onChange={handleExcelToCloud}
+                                        disabled={isLoading}
+                                    />
+                                    <button className="w-full bg-emerald-600 text-white py-2.5 rounded-lg font-bold text-sm hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                                        <FileSpreadsheet className="w-4 h-4" /> Import Excel to Cloud
                                     </button>
                                 </div>
                             </div>
-                        )}
-                        
-                        {status && (
-                            <div className={`p-3 rounded-lg text-center text-sm font-bold animate-in fade-in ${status.includes('Error') ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'}`}>
-                                {status}
+                        </div>
+
+                        {/* Pull Card (Placeholder for now) */}
+                        <div className="border border-slate-200 rounded-xl p-6 bg-slate-50 opacity-75">
+                            <div className="flex items-center gap-3 mb-4">
+                                <RefreshCw className="w-6 h-6 text-slate-400" />
+                                <h3 className="font-bold text-slate-600">Pull from Cloud</h3>
                             </div>
-                        )}
+                            <p className="text-sm text-slate-400 mb-6 min-h-[40px]">
+                                Download latest team data (Coming Soon).
+                            </p>
+                            <button disabled className="w-full bg-slate-200 text-slate-400 py-2.5 rounded-lg font-bold text-sm cursor-not-allowed">
+                                Sync Down
+                            </button>
+                        </div>
                     </div>
-                )}
-            </div>
+                    
+                    {error && (
+                        <div className="m-6 p-4 bg-red-50 text-red-600 rounded-xl text-sm font-medium border border-red-100 break-words">
+                            {error}
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 };

@@ -160,7 +160,8 @@ export const addListItem = async (siteId: string, listId: string, fields: any): 
     if (!res.ok) {
         const err = await res.json();
         console.error("Add Item Error", err);
-        throw new Error("Failed to add item");
+        // Throw specific error message for debugging
+        throw new Error(err.error?.message || "Failed to add item");
     }
 };
 
@@ -182,12 +183,17 @@ export const ensureCarsanLists = async (siteId: string, forceToken = false) => {
     // Note: We deliberately DO NOT check if the list exists first using 'find' because pagination might hide it.
     // Instead, we try to create it and handle the 409 (Conflict/Exists) error in createSharePointList.
     
-    // 1. Project List - 'Title' is default, do not re-add it or it causes errors
+    // 1. Project List - Updated with new columns requested
     await createSharePointList(siteId, 'Carsan_Projects', [
         { name: 'Client', text: {} },
         { name: 'Status', text: {} },
         { name: 'Value', number: {} },
-        { name: 'JSON_Data', text: {} } // Stores the full object as string
+        { name: 'ADDRESS', text: {} },
+        { name: 'Estimator', text: {} },
+        { name: 'Delivery Date', dateTime: {} }, 
+        { name: 'Expiration Date', dateTime: {} },
+        { name: 'Awarded Date', dateTime: {} },
+        { name: 'JSON_Data', text: {} } // Stores the full object as backup/complex data
     ], forceToken);
 
     // 2. Materials List
