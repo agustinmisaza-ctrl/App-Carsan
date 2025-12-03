@@ -104,16 +104,22 @@ export const getGraphToken = async (scopes: string[], forceInteractive: boolean 
             return response.accessToken;
         } catch (e) {
             console.warn("Silent token acquisition failed, attempting interactive...", e);
-            // Silent failed, try popup
-            // CRITICAL CHANGE: Use acquireTokenPopup, NOT loginPopup
-            const response = await msal.acquireTokenPopup({ scopes, account });
+            // Silent failed, try popup with forced prompt
+            const response = await msal.acquireTokenPopup({ 
+                scopes, 
+                account,
+                prompt: 'select_account' 
+            });
             return response.accessToken;
         }
     } else {
         // Interactive required or forced
         console.log("Acquiring token interactively (forced or no account)...");
-        // CRITICAL CHANGE: Use acquireTokenPopup to ensure scopes are granted
-        const response = await msal.acquireTokenPopup({ scopes });
+        // Use prompt: 'select_account' to force UI and refresh consent
+        const response = await msal.acquireTokenPopup({ 
+            scopes,
+            prompt: 'select_account'
+        });
         return response.accessToken;
     }
 };

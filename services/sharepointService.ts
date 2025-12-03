@@ -1,5 +1,4 @@
 
-
 import { getGraphToken } from "./emailIntegration";
 
 // Types for Internal SharePoint Data
@@ -24,7 +23,7 @@ export interface SPItem {
     fields: any;
 }
 
-const SCOPES = ["Sites.ReadWrite.All"];
+const SCOPES = ["Sites.ReadWrite.All", "Sites.Manage.All"];
 
 // --- READ OPERATIONS ---
 
