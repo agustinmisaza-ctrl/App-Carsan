@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { User, UserRole } from '../types';
 import { Lock, User as UserIcon, AlertCircle, ArrowRight, ShieldCheck, Key, Upload } from 'lucide-react';
@@ -240,7 +239,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 </div>
             </div>
 
-            <h1 className="text-2xl font-bold text-white tracking-tight">CARSAN Estimator</h1>
+            <h1 className="text-2xl font-bold text-white tracking-tight">CARSAN Electric App</h1>
             <p className="text-blue-200 text-sm mt-1">Professional Electrical Estimating</p>
           </div>
         </div>

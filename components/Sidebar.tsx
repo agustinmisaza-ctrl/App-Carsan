@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { ViewState, User } from '../types';
 import { LayoutDashboard, FileText, Database, FolderOpen, X, LogOut, Users, Download, FileDiff, BarChart2, Upload, Cloud } from 'lucide-react';
@@ -138,7 +137,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isO
               
               <div className="flex flex-col justify-center">
                   <span className="text-lg font-bold text-white tracking-tight leading-none">CARSAN</span>
-                  <span className="text-[10px] font-bold text-blue-400 tracking-[0.25em] uppercase mt-1">Estimator</span>
+                  <span className="text-[10px] font-bold text-blue-400 tracking-[0.1em] uppercase mt-1">Electric App</span>
               </div>
 
               {/* Hover Upload Hint */}
