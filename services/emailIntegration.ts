@@ -68,7 +68,7 @@ export const signOut = async () => {
 };
 
 // EXPORTED GENERIC TOKEN FETCHER
-export const getGraphToken = async (scopes: string[]): Promise<string> => {
+export const getGraphToken = async (scopes: string[], forceInteractive: boolean = false): Promise<string> => {
     const clientId = getStoredClientId();
     if (!clientId) throw new Error("Client ID not configured");
 
@@ -76,7 +76,7 @@ export const getGraphToken = async (scopes: string[]): Promise<string> => {
     const accounts = msal.getAllAccounts();
     let account = accounts[0];
 
-    if (account) {
+    if (account && !forceInteractive) {
         try {
             const response = await msal.acquireTokenSilent({
                 scopes,

@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
-import { Cloud, Check, Loader2, Database, AlertTriangle, RefreshCw, Globe, ChevronRight, Settings, Save, Copy, LogOut } from 'lucide-react';
+import { Cloud, Check, Loader2, Database, AlertTriangle, RefreshCw, Globe, ChevronRight, Settings, Save, Copy, LogOut, ShieldAlert } from 'lucide-react';
 import { searchSharePointSites, ensureCarsanLists, addListItem, getSharePointLists, getListItems, updateListItem, SPSite } from '../services/sharepointService';
 import { ProjectEstimate, MaterialItem } from '../types';
-import { getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId, signOut } from '../services/emailIntegration';
+import { getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId, signOut, getGraphToken } from '../services/emailIntegration';
 
 interface SharePointConnectProps {
     projects: ProjectEstimate[];
@@ -26,6 +26,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
     const [clientId, setClientId] = useState('');
     const [configError, setConfigError] = useState<string | null>(null);
     const [permissionError, setPermissionError] = useState(false);
+    const [rawError, setRawError] = useState<string>('');
     const [copied, setCopied] = useState(false);
 
     useEffect(() => {
@@ -55,6 +56,19 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
     const handleResetSession = async () => {
         await signOut();
         window.location.reload();
+    };
+
+    const handleForceRepair = async () => {
+        try {
+            // Force an interactive login specifically for SharePoint scopes
+            await getGraphToken(['Sites.ReadWrite.All'], true);
+            setPermissionError(false);
+            setRawError('');
+            alert("Permissions refreshed! Please try 'Initialize Database' again.");
+        } catch (e: any) {
+            console.error(e);
+            alert(`Repair failed: ${e.message}`);
+        }
     };
 
     const handleSearchSites = async () => {
@@ -110,16 +124,20 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         setLoading(true);
         setStatus('Creating SharePoint Lists...');
         setPermissionError(false);
+        setRawError('');
+        
         try {
             await ensureCarsanLists(selectedSite.id);
             setDbInitialized(true);
             setStatus('Database Created!');
         } catch (e: any) {
             setStatus('Error creating lists.');
-            if (e.message.includes('Sites.ReadWrite.All') || e.message.includes('Access Denied')) {
+            setRawError(e.message || JSON.stringify(e));
+            
+            if (e.message.includes('Sites.ReadWrite.All') || e.message.includes('Access Denied') || e.message.includes('403')) {
                 setPermissionError(true);
             } else {
-                alert(e.message || "Failed to create lists. Check permissions.");
+                alert(e.message || "Failed to create lists. Check console.");
             }
         } finally {
             setLoading(false);
@@ -327,14 +345,30 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                                 </p>
                                 {permissionError && (
                                     <div className="bg-red-50 border border-red-200 p-4 rounded-lg text-left mb-4">
-                                        <p className="text-red-800 font-bold text-sm mb-2">Old Credentials Detected</p>
-                                        <p className="text-red-700 text-xs mb-3">Your browser has an old security token without the new 'Sites.ReadWrite.All' permission.</p>
-                                        <button 
-                                            onClick={handleResetSession}
-                                            className="w-full bg-red-600 text-white py-2 rounded-lg font-bold text-sm hover:bg-red-700 flex items-center justify-center gap-2"
-                                        >
-                                            <LogOut className="w-4 h-4" /> Refresh Session (Log Out)
-                                        </button>
+                                        <p className="text-red-800 font-bold text-sm mb-2 flex items-center gap-2">
+                                            <ShieldAlert className="w-4 h-4" /> Permission Issue
+                                        </p>
+                                        <p className="text-red-700 text-xs mb-3 leading-relaxed">
+                                            The app cannot create lists. Possible reasons:<br/>
+                                            1. You are a <strong>Visitor</strong> on this SharePoint site (Need 'Edit' access).<br/>
+                                            2. The app's security token is outdated or missing scopes.
+                                        </p>
+                                        <p className="text-[10px] font-mono bg-red-100 p-2 rounded mb-3 break-all">{rawError}</p>
+                                        
+                                        <div className="flex gap-2">
+                                            <button 
+                                                onClick={handleForceRepair}
+                                                className="flex-1 bg-white border border-red-200 text-red-700 py-2 rounded-lg font-bold text-sm hover:bg-red-50 flex items-center justify-center gap-2"
+                                            >
+                                                <RefreshCw className="w-4 h-4" /> Repair Connection
+                                            </button>
+                                            <button 
+                                                onClick={handleResetSession}
+                                                className="flex-1 bg-red-600 text-white py-2 rounded-lg font-bold text-sm hover:bg-red-700 flex items-center justify-center gap-2"
+                                            >
+                                                <LogOut className="w-4 h-4" /> Full Log Out
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
                                 <button 
