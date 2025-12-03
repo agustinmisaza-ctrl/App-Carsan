@@ -43,17 +43,49 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isO
     }
   };
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const resizeImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target?.result as string;
+            img.onload = () => {
+                const elem = document.createElement('canvas');
+                const maxWidth = 150; // Resize to reasonable logo width
+                const scaleFactor = maxWidth / img.width;
+                elem.width = maxWidth;
+                elem.height = img.height * scaleFactor;
+                
+                const ctx = elem.getContext('2d');
+                ctx?.drawImage(img, 0, 0, elem.width, elem.height);
+                
+                // Compress to JPEG with 0.8 quality
+                resolve(elem.toDataURL('image/jpeg', 0.8));
+            };
+            img.onerror = (error) => reject(error);
+        };
+        reader.onerror = (error) => reject(error);
+    });
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
 
-      const reader = new FileReader();
-      reader.onload = (event) => {
-          const base64 = event.target?.result as string;
+      try {
+          // Resize image before saving to avoid LocalStorage Quota Exceeded
+          const base64 = await resizeImage(file);
           setCustomLogo(base64);
-          localStorage.setItem('carsan_custom_logo', base64);
-      };
-      reader.readAsDataURL(file);
+          try {
+              localStorage.setItem('carsan_custom_logo', base64);
+          } catch (err) {
+              alert("Storage is full! Could not save logo permanently. Try clearing some data or using a smaller image.");
+          }
+      } catch (err) {
+          console.error("Error processing image", err);
+          alert("Failed to process image.");
+      }
   };
 
   const navItemClass = (view: ViewState) =>

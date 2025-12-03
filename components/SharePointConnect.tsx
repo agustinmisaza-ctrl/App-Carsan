@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
-import { Cloud, Check, Loader2, Database, AlertTriangle, RefreshCw, Globe, ChevronRight, Settings, Save, Copy } from 'lucide-react';
+import { Cloud, Check, Loader2, Database, AlertTriangle, RefreshCw, Globe, ChevronRight, Settings, Save, Copy, LogOut } from 'lucide-react';
 import { searchSharePointSites, ensureCarsanLists, addListItem, getSharePointLists, getListItems, updateListItem, SPSite } from '../services/sharepointService';
 import { ProjectEstimate, MaterialItem } from '../types';
-import { getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId } from '../services/emailIntegration';
+import { getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId, signOut } from '../services/emailIntegration';
 
 interface SharePointConnectProps {
     projects: ProjectEstimate[];
@@ -25,6 +25,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
     const [tenantId, setTenantId] = useState('');
     const [clientId, setClientId] = useState('');
     const [configError, setConfigError] = useState<string | null>(null);
+    const [permissionError, setPermissionError] = useState(false);
     const [copied, setCopied] = useState(false);
 
     useEffect(() => {
@@ -51,9 +52,15 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         handleSearchSites();
     };
 
+    const handleResetSession = async () => {
+        await signOut();
+        window.location.reload();
+    };
+
     const handleSearchSites = async () => {
         setLoading(true);
         setConfigError(null);
+        setPermissionError(false);
         try {
             const results = await searchSharePointSites("");
             setSites(results);
@@ -102,14 +109,15 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         if (!selectedSite) return;
         setLoading(true);
         setStatus('Creating SharePoint Lists...');
+        setPermissionError(false);
         try {
             await ensureCarsanLists(selectedSite.id);
             setDbInitialized(true);
             setStatus('Database Created!');
         } catch (e: any) {
             setStatus('Error creating lists.');
-            if (e.message.includes('Sites.ReadWrite.All')) {
-                alert("AZURE ERROR: Missing Permission.\n\nYou must add 'Sites.ReadWrite.All' to your App Registration in Azure Portal and Grant Admin Consent.");
+            if (e.message.includes('Sites.ReadWrite.All') || e.message.includes('Access Denied')) {
+                setPermissionError(true);
             } else {
                 alert(e.message || "Failed to create lists. Check permissions.");
             }
@@ -317,6 +325,18 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                                 <p className="text-amber-700 text-sm mb-4">
                                     The required lists (Carsan_Projects, Carsan_Materials) do not exist on this site.
                                 </p>
+                                {permissionError && (
+                                    <div className="bg-red-50 border border-red-200 p-4 rounded-lg text-left mb-4">
+                                        <p className="text-red-800 font-bold text-sm mb-2">Old Credentials Detected</p>
+                                        <p className="text-red-700 text-xs mb-3">Your browser has an old security token without the new 'Sites.ReadWrite.All' permission.</p>
+                                        <button 
+                                            onClick={handleResetSession}
+                                            className="w-full bg-red-600 text-white py-2 rounded-lg font-bold text-sm hover:bg-red-700 flex items-center justify-center gap-2"
+                                        >
+                                            <LogOut className="w-4 h-4" /> Refresh Session (Log Out)
+                                        </button>
+                                    </div>
+                                )}
                                 <button 
                                     onClick={handleInitializeDB}
                                     disabled={loading}

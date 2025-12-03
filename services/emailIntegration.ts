@@ -56,6 +56,17 @@ const initializeMsal = async () => {
     return msalInstance;
 };
 
+export const signOut = async () => {
+    const msal = await initializeMsal();
+    // Clear all account data
+    const accounts = msal.getAllAccounts();
+    if (accounts.length > 0) {
+        await msal.logoutPopup();
+    }
+    sessionStorage.clear();
+    msalInstance = null;
+};
+
 // EXPORTED GENERIC TOKEN FETCHER
 export const getGraphToken = async (scopes: string[]): Promise<string> => {
     const clientId = getStoredClientId();
