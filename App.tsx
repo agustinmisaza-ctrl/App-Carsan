@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { ViewState, MaterialItem, ProjectEstimate, User, ServiceTicket, PurchaseRecord, Lead, Opportunity } from './types';
 import { Sidebar } from './components/Sidebar';
@@ -142,8 +141,12 @@ const getProjectValue = (p: ProjectEstimate) => {
     return sub + (sub * 0.25); 
 };
 
+// HARD RESET FLAG - SET TO TRUE ONCE TO CLEAR DATA
+const RESET_APP = true;
+
 // Generic Helper to load from LocalStorage
 const loadState = <T,>(key: string, fallback: T): T => {
+    if (RESET_APP) return fallback;
     const saved = localStorage.getItem(key);
     if (saved) {
         try {
@@ -170,6 +173,7 @@ export const App: React.FC = () => {
     
     // Purchase Data is special - check local storage, if empty, load utils
     const [purchases, setPurchases] = useState<PurchaseRecord[]>(() => {
+        if (RESET_APP) return processPurchaseData(INITIAL_CSV_DATA);
         const saved = localStorage.getItem('carsan_purchases');
         if (saved) {
             try { return JSON.parse(saved); } catch(e) {}
@@ -178,6 +182,14 @@ export const App: React.FC = () => {
     });
   
     // --- EFFECTS TO SAVE STATE ---
+    // Clear storage ONCE if reset is true
+    useEffect(() => {
+        if (RESET_APP) {
+            console.log("HARD RESET: Clearing LocalStorage");
+            localStorage.clear();
+        }
+    }, []);
+
     useEffect(() => { localStorage.setItem('carsan_materials', JSON.stringify(materials)); }, [materials]);
     useEffect(() => { localStorage.setItem('carsan_projects', JSON.stringify(projects)); }, [projects]);
     useEffect(() => { localStorage.setItem('carsan_tickets', JSON.stringify(tickets)); }, [tickets]);
