@@ -188,6 +188,8 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                     const awardedDate = parseExcelDate(findVal(['Awarded Date', 'Start Date']));
 
                     try {
+                        console.log(`Uploading Row ${i}:`, { name, client, address, estimator }); // Debug Log
+                        
                         await addListItem(selectedSite.id, projectList.id, {
                             Title: name,
                             Client: client,
@@ -550,6 +552,33 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                                 <AlertTriangle className="w-4 h-4" /> Error
                             </div>
                             <p className="mb-4">{error}</p>
+                            
+                            {error.includes("Access Denied") || error.includes("403") ? (
+                                <div className="space-y-2">
+                                    <p className="text-xs text-red-800">
+                                        <strong>Permission Issue:</strong>
+                                        <br />1. You are a <strong>Visitor</strong> on this SharePoint site (Need 'Edit' access).
+                                        <br />2. The app's security token is outdated or missing scopes.
+                                        <br />
+                                        <br />
+                                        <code className="bg-red-100 p-1 rounded">Access Denied (403). Missing 'Sites.ReadWrite.All' or user lacks Edit permissions on this specific site.</code>
+                                    </p>
+                                    <div className="flex gap-2">
+                                        <button 
+                                            onClick={() => handleInitialize(true)} 
+                                            className="w-full bg-white border border-red-200 text-red-600 py-2 rounded-lg text-xs font-bold hover:bg-red-50 flex items-center justify-center gap-2"
+                                        >
+                                            <RefreshCw className="w-3 h-3" /> Repair Connection
+                                        </button>
+                                        <button 
+                                            onClick={handleLogout} 
+                                            className="w-full bg-red-600 text-white py-2 rounded-lg text-xs font-bold hover:bg-red-700 flex items-center justify-center gap-2"
+                                        >
+                                            <LogOut className="w-3 h-3" /> Full Log Out
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : null}
                         </div>
                     )}
                 </div>
