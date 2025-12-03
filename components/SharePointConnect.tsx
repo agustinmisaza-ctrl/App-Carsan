@@ -106,8 +106,13 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
             await ensureCarsanLists(selectedSite.id);
             setDbInitialized(true);
             setStatus('Database Created!');
-        } catch (e) {
+        } catch (e: any) {
             setStatus('Error creating lists.');
+            if (e.message.includes('Sites.ReadWrite.All')) {
+                alert("AZURE ERROR: Missing Permission.\n\nYou must add 'Sites.ReadWrite.All' to your App Registration in Azure Portal and Grant Admin Consent.");
+            } else {
+                alert(e.message || "Failed to create lists. Check permissions.");
+            }
         } finally {
             setLoading(false);
         }
@@ -357,7 +362,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                         )}
                         
                         {status && (
-                            <div className="p-3 bg-blue-50 text-blue-700 rounded-lg text-center text-sm font-bold animate-in fade-in">
+                            <div className={`p-3 rounded-lg text-center text-sm font-bold animate-in fade-in ${status.includes('Error') ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'}`}>
                                 {status}
                             </div>
                         )}

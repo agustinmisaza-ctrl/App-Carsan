@@ -126,7 +126,25 @@ export const createSharePointList = async (siteId: string, listName: string, col
         })
     });
 
-    if (!listRes.ok) throw new Error(`Failed to create list: ${listName}`);
+    if (!listRes.ok) {
+        // Handle "Name Already Exists" (409 Conflict) gracefully
+        if (listRes.status === 409) {
+            console.log(`List ${listName} already exists. Skipping creation.`);
+            // Fetch the existing list to return it
+            const allLists = await getSharePointLists(siteId);
+            const existing = allLists.find(l => l.displayName === listName);
+            if (existing) return existing;
+        }
+        
+        // Handle Permissions Error (403 Forbidden)
+        if (listRes.status === 403) {
+            throw new Error(`Access Denied. You are missing 'Sites.ReadWrite.All' permission in Azure.`);
+        }
+
+        const errData = await listRes.json().catch(() => ({}));
+        console.error("Create List Error", errData);
+        throw new Error(`Failed to create list ${listName}: ${errData.error?.message || listRes.statusText}`);
+    }
     return await listRes.json();
 };
 
@@ -162,28 +180,23 @@ export const updateListItem = async (siteId: string, listId: string, itemId: str
 
 // Auto-Provisioning helper
 export const ensureCarsanLists = async (siteId: string) => {
-    const lists = await getSharePointLists(siteId);
+    // Note: We deliberately DO NOT check if the list exists first using 'find' because pagination might hide it.
+    // Instead, we try to create it and handle the 409 (Conflict/Exists) error in createSharePointList.
     
-    // 1. Project List
-    if (!lists.find(l => l.displayName === 'Carsan_Projects')) {
-        await createSharePointList(siteId, 'Carsan_Projects', [
-            { name: 'Title', text: {} },
-            { name: 'Client', text: {} },
-            { name: 'Status', text: {} },
-            { name: 'Value', number: {} },
-            { name: 'JSON_Data', text: {} } // Stores the full object as string
-        ]);
-    }
+    // 1. Project List - 'Title' is default, do not re-add it or it causes errors
+    await createSharePointList(siteId, 'Carsan_Projects', [
+        { name: 'Client', text: {} },
+        { name: 'Status', text: {} },
+        { name: 'Value', number: {} },
+        { name: 'JSON_Data', text: {} } // Stores the full object as string
+    ]);
 
     // 2. Materials List
-    if (!lists.find(l => l.displayName === 'Carsan_Materials')) {
-        await createSharePointList(siteId, 'Carsan_Materials', [
-            { name: 'Title', text: {} }, // Item Name
-            { name: 'Category', text: {} },
-            { name: 'Cost', number: {} },
-            { name: 'JSON_Data', text: {} }
-        ]);
-    }
+    await createSharePointList(siteId, 'Carsan_Materials', [
+        { name: 'Category', text: {} },
+        { name: 'Cost', number: {} },
+        { name: 'JSON_Data', text: {} }
+    ]);
     
     return true;
 };
