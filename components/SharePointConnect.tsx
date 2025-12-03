@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { ProjectEstimate, MaterialItem, ServiceTicket } from '../types';
 import { searchSharePointSites, ensureCarsanLists, getSharePointLists, addListItem, updateListItem, getListItems } from '../services/sharepointService';
-import { Cloud, Search, Database, Check, Loader2, AlertTriangle, RefreshCw, Upload, FileSpreadsheet, LogOut, Settings } from 'lucide-react';
+import { Cloud, Search, Database, Check, Loader2, AlertTriangle, RefreshCw, Upload, FileSpreadsheet, LogOut, Settings, DollarSign } from 'lucide-react';
 import { getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId, signOut } from '../services/emailIntegration';
 import * as XLSX from 'xlsx';
 
@@ -58,7 +58,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         setRawError(null);
         try {
             await ensureCarsanLists(selectedSite.id, forceNewToken);
-            setStatus("Database Ready! Lists 'Carsan_Projects' and 'Carsan_Materials' verified.");
+            setStatus("Database Ready! Lists 'Carsan_Projects', 'Carsan_Materials', and 'Carsan_Purchases' verified.");
             setStep('sync');
         } catch (e: any) {
             console.error("Init Error", e);
@@ -226,6 +226,88 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         reader.readAsArrayBuffer(file);
     };
 
+    const handlePurchaseHistoryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !selectedSite) return;
+
+        setIsLoading(true);
+        setStatus("Reading Purchase History...");
+
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            try {
+                const data = event.target?.result;
+                const workbook = XLSX.read(data, { type: 'array' });
+                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+                const lists = await getSharePointLists(selectedSite.id);
+                const purchaseList = lists.find((l: any) => l.displayName === 'Carsan_Purchases');
+                
+                if (!purchaseList) throw new Error("List 'Carsan_Purchases' not found. Please click 'Initialize Database' first.");
+
+                let successCount = 0;
+                let failCount = 0;
+                const total = jsonData.length;
+
+                setStatus(`Uploading ${total} purchase records...`);
+
+                for (let i = 0; i < total; i++) {
+                    const row: any = jsonData[i];
+                    
+                    const findVal = (keys: string[]) => {
+                        for (const key of keys) if (row[key] !== undefined) return row[key];
+                        return undefined;
+                    };
+
+                    const parseExcelDate = (val: any) => {
+                        if (!val) return null;
+                        if (typeof val === 'number') return new Date(Math.round((val - 25569)*86400*1000)).toISOString();
+                        const d = new Date(val);
+                        return !isNaN(d.getTime()) ? d.toISOString() : null;
+                    };
+
+                    try {
+                        await addListItem(selectedSite.id, purchaseList.id, {
+                            Title: `PO-${findVal(['Purchase Order #', 'PO Number', 'PO']) || i}`,
+                            PurchaseDate: parseExcelDate(findVal(['Date', 'Invoice Date'])),
+                            PO_Number: String(findVal(['Purchase Order #', 'PO Number', 'PO']) || ''),
+                            Brand: String(findVal(['Brand']) || ''),
+                            Item_Description: String(findVal(['Item', 'Item Description']) || ''),
+                            Quantity: Number(findVal(['Quantity', 'Qty']) || 0),
+                            Unit_Cost: Number(findVal(['Unit Cost', 'Price', 'Rate']) || 0),
+                            Total_Cost: Number(findVal(['Total', 'Total Cost']) || 0),
+                            Supplier: String(findVal(['Supplier', 'Vendor']) || ''),
+                            Project_Name: String(findVal(['Project', 'Project Name']) || ''),
+                            Item_Type: String(findVal(['TYPE', 'Type', 'Category']) || ''),
+                            JSON_Data: JSON.stringify(row)
+                        });
+                        successCount++;
+                    } catch (err: any) {
+                        console.error(`Failed row ${i+1}:`, err);
+                        failCount++;
+                        setError(`Row ${i+1} Error: ${err.message}`);
+                    }
+
+                    if (i % 5 === 0) {
+                        setStatus(`Uploading record ${i + 1} of ${total}...`);
+                        await new Promise(resolve => setTimeout(resolve, 300));
+                    }
+                }
+
+                alert(`Purchase History Import Complete!\nUploaded: ${successCount}\nFailed: ${failCount}`);
+                setStatus(`Finished. Success: ${successCount}, Fail: ${failCount}`);
+
+            } catch (err: any) {
+                setError("Excel processing failed: " + err.message);
+            } finally {
+                setIsLoading(false);
+                if (e.target) e.target.value = '';
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    };
+
     const handleLogout = async () => {
         await signOut();
         window.location.reload();
@@ -258,6 +340,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                                 className="w-full border border-slate-300 rounded-lg p-3 text-sm"
                                 placeholder="Paste your Tenant ID here"
                             />
+                            <p className="text-[10px] text-slate-400 mt-1">Found in Overview &gt; Directory (tenant) ID. Required for Single-Tenant apps.</p>
                         </div>
                         <div>
                             <label className="block text-sm font-bold text-slate-700 mb-1">Client ID</label>
@@ -319,7 +402,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                             {selectedSite && (
                                 <div className="pt-6 animate-in fade-in">
                                     <button 
-                                        onClick={() => handleInitialize(false)}
+                                        onClick={() => handleInitialize(true)}
                                         className="bg-slate-900 text-white px-8 py-3 rounded-xl font-bold hover:bg-slate-800 transition shadow-lg w-full md:w-auto"
                                     >
                                         Connect to: {selectedSite.displayName}
@@ -331,23 +414,37 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
 
                     {error && (
                         <div className="mt-6 bg-red-50 text-red-600 p-4 rounded-xl text-sm text-left border border-red-100">
-                            <p className="font-bold flex items-center gap-2 mb-1">
-                                <AlertTriangle className="w-4 h-4" /> Connection Error
-                            </p>
-                            <p className="font-mono text-xs opacity-90 break-all">{error}</p>
-                            {rawError && (
-                                <pre className="mt-2 text-[10px] bg-white/50 p-2 rounded overflow-auto max-h-20">
-                                    {JSON.stringify(rawError, null, 2)}
-                                </pre>
-                            )}
-                            <div className="mt-3 flex gap-2">
-                                <button onClick={() => setStep('config')} className="text-xs bg-white border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50 font-bold">
-                                    Check Configuration
-                                </button>
-                                <button onClick={handleLogout} className="text-xs bg-red-600 text-white px-3 py-1.5 rounded-lg hover:bg-red-700 font-bold flex items-center gap-1">
-                                    <LogOut className="w-3 h-3" /> Full Sign Out
-                                </button>
+                            <div className="font-bold flex items-center gap-2 mb-1">
+                                <AlertTriangle className="w-4 h-4" /> Error
                             </div>
+                            <p className="mb-4">{error}</p>
+                            
+                            {error.includes("Access Denied") || error.includes("403") ? (
+                                <div className="space-y-2">
+                                    <p className="text-xs text-red-800">
+                                        <strong>Permission Issue:</strong>
+                                        <br />1. You are a <strong>Visitor</strong> on this SharePoint site (Need 'Edit' access).
+                                        <br />2. The app's security token is outdated or missing scopes.
+                                        <br />
+                                        <br />
+                                        <code className="bg-red-100 p-1 rounded">Access Denied (403). Missing 'Sites.ReadWrite.All' or user lacks Edit permissions on this specific site.</code>
+                                    </p>
+                                    <div className="flex gap-2">
+                                        <button 
+                                            onClick={() => handleInitialize(true)} 
+                                            className="w-full bg-white border border-red-200 text-red-600 py-2 rounded-lg text-xs font-bold hover:bg-red-50 flex items-center justify-center gap-2"
+                                        >
+                                            <RefreshCw className="w-3 h-3" /> Repair Connection
+                                        </button>
+                                        <button 
+                                            onClick={handleLogout} 
+                                            className="w-full bg-red-600 text-white py-2 rounded-lg text-xs font-bold hover:bg-red-700 flex items-center justify-center gap-2"
+                                        >
+                                            <LogOut className="w-3 h-3" /> Full Log Out
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : null}
                         </div>
                     )}
                 </div>
@@ -383,7 +480,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                                 <h3 className="font-bold text-slate-900">Push to Cloud</h3>
                             </div>
                             <p className="text-sm text-slate-500 mb-6 min-h-[40px]">
-                                Upload your local projects to SharePoint.
+                                Upload your local projects (0) to SharePoint for the team.
                             </p>
                             <div className="space-y-3">
                                 <button 
@@ -391,7 +488,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                                     disabled={isLoading}
                                     className="w-full bg-slate-900 text-white py-2.5 rounded-lg font-bold text-sm hover:bg-slate-800 disabled:opacity-50"
                                 >
-                                    Upload App Data
+                                    Upload Local Data
                                 </button>
                                 <div className="relative">
                                     <input 
@@ -415,17 +512,44 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                                 <h3 className="font-bold text-slate-600">Pull from Cloud</h3>
                             </div>
                             <p className="text-sm text-slate-400 mb-6 min-h-[40px]">
-                                Download latest team data (Coming Soon).
+                                Download the latest team data. (Overwrites local changes).
                             </p>
                             <button disabled className="w-full bg-slate-200 text-slate-400 py-2.5 rounded-lg font-bold text-sm cursor-not-allowed">
                                 Sync Down
                             </button>
                         </div>
+
+                        {/* Purchase History Upload */}
+                        <div className="col-span-2 border border-blue-200 bg-blue-50/50 rounded-xl p-6 hover:shadow-md transition">
+                            <div className="flex items-center gap-3 mb-4">
+                                <DollarSign className="w-6 h-6 text-blue-600" />
+                                <h3 className="font-bold text-slate-900">Purchase History (Price Analysis)</h3>
+                            </div>
+                            <p className="text-sm text-slate-500 mb-4">
+                                Upload your Price Analysis Excel file to the 'Carsan_Purchases' SharePoint list.
+                            </p>
+                            <div className="relative">
+                                <input 
+                                    type="file" 
+                                    accept=".xlsx, .xls"
+                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                    onChange={handlePurchaseHistoryUpload}
+                                    disabled={isLoading}
+                                    title="Upload Excel File with columns: Date, PO #, Brand, Item, etc."
+                                />
+                                <button className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-bold text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                                    <Upload className="w-4 h-4" /> Import Purchase History
+                                </button>
+                            </div>
+                        </div>
                     </div>
                     
                     {error && (
                         <div className="m-6 p-4 bg-red-50 text-red-600 rounded-xl text-sm font-medium border border-red-100 break-words">
-                            {error}
+                            <div className="flex items-center gap-2 font-bold mb-2">
+                                <AlertTriangle className="w-4 h-4" /> Error
+                            </div>
+                            <p className="mb-4">{error}</p>
                         </div>
                     )}
                 </div>

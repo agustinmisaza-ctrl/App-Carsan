@@ -1,10 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Lead } from '../types';
 import { fetchOutlookEmails, getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId } from '../services/emailIntegration';
 import { Mail, RefreshCw, Settings, User as UserIcon, Phone, Search, Save, Loader2 } from 'lucide-react';
 
-export const CRM: React.FC = () => {
-    const [leads, setLeads] = useState<Lead[]>([]);
+interface CRMProps {
+    leads: Lead[];
+    setLeads: (leads: Lead[]) => void;
+    opportunities: any[];
+    setOpportunities: (opps: any[]) => void;
+}
+
+export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpportunities }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     
@@ -62,6 +68,13 @@ export const CRM: React.FC = () => {
                     <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
                         <Settings className="w-4 h-4" /> Azure Integration Settings
                     </h3>
+                    <div className="bg-blue-50 p-4 rounded-lg mb-6 text-sm text-blue-800">
+                        <p className="font-bold mb-1">Vercel Deployment Detected</p>
+                        <p>Your redirect URI changes with every deployment preview. <br/>
+                        <strong>Current Redirect URI:</strong> <code className="bg-white px-1 py-0.5 rounded border">{window.location.origin}</code>
+                        </p>
+                        <p className="mt-2 text-xs">If you see error <strong>AADSTS50011</strong>, copy the URI above and add it to your Azure App Registration.</p>
+                    </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Azure Tenant ID</label>

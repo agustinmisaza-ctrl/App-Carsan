@@ -183,7 +183,7 @@ export const ensureCarsanLists = async (siteId: string, forceToken = false) => {
     // Note: We deliberately DO NOT check if the list exists first using 'find' because pagination might hide it.
     // Instead, we try to create it and handle the 409 (Conflict/Exists) error in createSharePointList.
     
-    // 1. Project List - Updated with new columns requested
+    // 1. Project List
     await createSharePointList(siteId, 'Carsan_Projects', [
         { name: 'Client', text: {} },
         { name: 'Status', text: {} },
@@ -193,13 +193,28 @@ export const ensureCarsanLists = async (siteId: string, forceToken = false) => {
         { name: 'Delivery Date', dateTime: {} }, 
         { name: 'Expiration Date', dateTime: {} },
         { name: 'Awarded Date', dateTime: {} },
-        { name: 'JSON_Data', text: {} } // Stores the full object as backup/complex data
+        { name: 'JSON_Data', text: {} }
     ], forceToken);
 
     // 2. Materials List
     await createSharePointList(siteId, 'Carsan_Materials', [
         { name: 'Category', text: {} },
         { name: 'Cost', number: {} },
+        { name: 'JSON_Data', text: {} }
+    ], forceToken);
+
+    // 3. Purchase History List (For Price Analysis)
+    await createSharePointList(siteId, 'Carsan_Purchases', [
+        { name: 'PurchaseDate', dateTime: {} },
+        { name: 'PO_Number', text: {} },
+        { name: 'Brand', text: {} },
+        { name: 'Item_Description', text: {} },
+        { name: 'Quantity', number: {} },
+        { name: 'Unit_Cost', number: {} },
+        { name: 'Total_Cost', number: {} },
+        { name: 'Supplier', text: {} },
+        { name: 'Project_Name', text: {} },
+        { name: 'Item_Type', text: {} },
         { name: 'JSON_Data', text: {} }
     ], forceToken);
     

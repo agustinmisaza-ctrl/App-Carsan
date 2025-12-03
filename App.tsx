@@ -8,6 +8,7 @@ import { CRM } from './components/CRM';
 import { ServiceModule } from './components/ServiceModule';
 import { PriceAnalysis } from './components/PriceAnalysis';
 import { AIAssistant } from './components/AIAssistant';
+import { SharePointConnect } from './components/SharePointConnect';
 import { ViewState, User, ProjectEstimate, MaterialItem, ServiceTicket, PurchaseRecord } from './types';
 
 // Configuration constant
@@ -31,7 +32,7 @@ const loadState = <T,>(key: string, fallback: T): T => {
 export const App: React.FC = () => {
     // Log Version for debugging
     useEffect(() => {
-        console.log("Carsan Estimator v1.7 Loaded - Production Build Fix");
+        console.log("Carsan Estimator v1.8 - Force Fix");
     }, []);
 
     const [user, setUser] = useState<User | null>(null);
@@ -43,12 +44,16 @@ export const App: React.FC = () => {
     const [materials, setMaterials] = useState<MaterialItem[]>(() => loadState('carsan_materials', []));
     const [tickets, setTickets] = useState<ServiceTicket[]>(() => loadState('carsan_tickets', []));
     const [purchases, setPurchases] = useState<PurchaseRecord[]>(() => loadState('carsan_purchases', []));
+    const [leads, setLeads] = useState<any[]>(() => loadState('carsan_leads', []));
+    const [opportunities, setOpportunities] = useState<any[]>(() => loadState('carsan_opportunities', []));
 
     // Persist Data
     useEffect(() => localStorage.setItem('carsan_projects', JSON.stringify(projects)), [projects]);
     useEffect(() => localStorage.setItem('carsan_materials', JSON.stringify(materials)), [materials]);
     useEffect(() => localStorage.setItem('carsan_tickets', JSON.stringify(tickets)), [tickets]);
     useEffect(() => localStorage.setItem('carsan_purchases', JSON.stringify(purchases)), [purchases]);
+    useEffect(() => localStorage.setItem('carsan_leads', JSON.stringify(leads)), [leads]);
+    useEffect(() => localStorage.setItem('carsan_opportunities', JSON.stringify(opportunities)), [opportunities]);
 
     const handleLogin = (loggedInUser: User) => {
         setUser(loggedInUser);
@@ -69,18 +74,59 @@ export const App: React.FC = () => {
                 return (
                     <div className="p-4 md:p-8 max-w-7xl mx-auto">
                         <h1 className="text-3xl font-bold mb-6 text-slate-900">Dashboard</h1>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                            {/* Finance Card */}
+                            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Revenue Won (YTD)</h3>
+                                <p className="text-2xl font-bold text-emerald-600">
+                                    ${projects.filter(p => p.status === 'Won').reduce((sum, p) => sum + (p.contractValue || 0), 0).toLocaleString()}
+                                </p>
+                            </div>
+                            
+                            {/* Operations Card */}
                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                                 <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Active Projects</h3>
-                                <p className="text-3xl font-bold text-slate-900">{projects.filter(p => p.status === 'Ongoing').length}</p>
+                                <div className="flex items-baseline gap-2">
+                                    <p className="text-3xl font-bold text-slate-900">{projects.filter(p => p.status === 'Ongoing').length}</p>
+                                    <span className="text-xs text-slate-400">Ongoing</span>
+                                </div>
                             </div>
-                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+
+                            {/* Estimating Card */}
+                            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                                 <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Pending Estimates</h3>
-                                <p className="text-3xl font-bold text-slate-900">{projects.filter(p => p.status === 'Draft' || p.status === 'Sent').length}</p>
+                                <p className="text-3xl font-bold text-blue-600">{projects.filter(p => p.status === 'Draft' || p.status === 'Sent').length}</p>
                             </div>
-                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+
+                            {/* Service Card */}
+                            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                                 <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Service Tickets</h3>
                                 <p className="text-3xl font-bold text-slate-900">{tickets.filter(t => t.status !== 'Completed').length}</p>
+                            </div>
+                        </div>
+
+                        {/* Action Items */}
+                        <div className="mt-8 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full bg-orange-500"></span> Action Items: Follow Ups
+                            </h3>
+                            <div className="space-y-3">
+                                {projects
+                                    .filter(p => p.followUpDate && new Date(p.followUpDate) <= new Date() && !['Won', 'Lost', 'Completed'].includes(p.status))
+                                    .map(p => (
+                                        <div key={p.id} className="flex justify-between items-center p-3 bg-orange-50 rounded-lg border border-orange-100">
+                                            <div>
+                                                <p className="font-bold text-slate-800 text-sm">{p.name}</p>
+                                                <p className="text-xs text-orange-600">Due for follow up: {new Date(p.followUpDate!).toLocaleDateString()}</p>
+                                            </div>
+                                            <button className="text-xs bg-white border border-orange-200 text-orange-700 px-3 py-1.5 rounded font-bold hover:bg-orange-100">
+                                                Contact Client
+                                            </button>
+                                        </div>
+                                    ))}
+                                {projects.filter(p => p.followUpDate && new Date(p.followUpDate) <= new Date() && !['Won', 'Lost', 'Completed'].includes(p.status)).length === 0 && (
+                                    <p className="text-sm text-slate-400 italic">No pending follow-ups today.</p>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -100,18 +146,13 @@ export const App: React.FC = () => {
             case ViewState.DATABASE:
                 return <PriceDatabase materials={materials} setMaterials={setMaterials} />;
             case ViewState.CRM:
-                return <CRM />;
+                return <CRM leads={leads} setLeads={setLeads} opportunities={opportunities} setOpportunities={setOpportunities} />;
             case ViewState.SERVICE:
                 return <ServiceModule user={user} materials={materials} projects={projects} tickets={tickets} setTickets={setTickets} />;
             case ViewState.PRICE_ANALYSIS:
                 return <PriceAnalysis purchases={purchases} setPurchases={setPurchases} materials={materials} setMaterials={setMaterials} />;
             case ViewState.CLOUD_DB:
-                return (
-                    <div className="p-8 text-center">
-                        <h1 className="text-2xl font-bold text-slate-800">Cloud Database</h1>
-                        <p className="text-slate-500 mt-2">SharePoint Integration is available in the Projects view.</p>
-                    </div>
-                );
+                return <SharePointConnect projects={projects} materials={materials} tickets={tickets} />;
             default:
                 return <div className="p-8">View not found</div>;
         }

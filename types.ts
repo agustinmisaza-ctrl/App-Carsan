@@ -1,25 +1,24 @@
-
-
 export enum ViewState {
   DASHBOARD = 'DASHBOARD',
+  PROJECTS = 'PROJECTS',
   ESTIMATE_NEW = 'ESTIMATE_NEW',
   DATABASE = 'DATABASE',
-  PROJECTS = 'PROJECTS',
   CRM = 'CRM',
   SERVICE = 'SERVICE',
   PRICE_ANALYSIS = 'PRICE_ANALYSIS',
-  CLOUD_DB = 'CLOUD_DB',
+  CLOUD_DB = 'CLOUD_DB'
 }
 
-export type UserRole = 'admin' | 'estimator';
+export type UserRole = 'admin' | 'estimator' | 'technician';
 
 export interface User {
   id: string;
   username: string;
-  name: string; // Used to match with project 'estimator' field
+  name: string;
   role: UserRole;
   avatarInitials: string;
-  mustChangePassword?: boolean; // Flag for first-time login
+  mustChangePassword?: boolean;
+  password?: string;
 }
 
 export interface MaterialItem {
@@ -33,53 +32,76 @@ export interface MaterialItem {
 
 export interface EstimateLineItem {
   id: string;
-  materialId?: string; // Link to database item if matched
   description: string;
   quantity: number;
+  materialId?: string;
   unitMaterialCost: number;
   unitLaborHours: number;
-  laborRate: number; // Hourly rate for this specific line (defaults to project rate)
-  attachments?: { name: string; data: string; type: string }[]; // For PDF/Word attachments
+  laborRate: number;
+  attachments?: { name: string; data: string; type: string }[];
 }
 
 export interface ProjectFile {
-  id: string;
-  name: string;
-  category: 'Permit' | 'As-Built' | 'Plan' | 'Inspection' | 'Other';
-  uploadDate: string;
-  fileData: string; // Base64
-  fileType: string;
+    id: string;
+    name: string;
+    category: 'Plan' | 'Permit' | 'Inspection' | 'As-Built' | 'Other';
+    uploadDate: string;
+    fileData?: string;
+    fileType?: string;
 }
 
 export interface ProjectEstimate {
   id: string;
   name: string;
   client: string;
-  contactInfo?: string; // Phone or Email
-  address: string; // Miami specific context
+  contactInfo?: string;
+  address: string;
   city?: string;
-  estimator?: string; // Who did it
+  estimator?: string;
   dateCreated: string;
   deliveryDate?: string;
   expirationDate?: string;
-  followUpDate?: string; // Date to follow up (defaults to delivery + 7 days)
-  awardedDate?: string; // Date the project was won
-  
-  // Project Management Fields
+  awardedDate?: string;
   startDate?: string;
   completionDate?: string;
-  status: 'Draft' | 'Finalized' | 'Sent' | 'Won' | 'Lost' | 'Ongoing' | 'Completed';
-  
-  projectFiles?: ProjectFile[]; // Permits, As-builts, etc.
-  scheduleFile?: string; // Base64 for the project schedule
-  scheduleMilestones?: string; // AI extracted summary of the schedule
-
-  laborRate: number; // Global labor rate for the project
+  status: 'Draft' | 'Sent' | 'Won' | 'Lost' | 'Ongoing' | 'Completed' | 'Finalized';
+  contractValue?: number;
+  laborRate: number;
   items: EstimateLineItem[];
-  blueprintImage?: string; // Base64 for the technical plan
-  quantityTableFile?: string; // Base64 for the quantity table
-  projectImage?: string; // Base64 for the project thumbnail/site photo
-  contractValue?: number; // Manual override for historical projects
+  blueprintImage?: string;
+  projectImage?: string;
+  quantityTableFile?: string;
+  projectFiles?: ProjectFile[];
+  scheduleFile?: string;
+  scheduleMilestones?: string;
+  followUpDate?: string;
+}
+
+export interface ServiceTicket {
+  id: string;
+  type: string;
+  projectId?: string;
+  clientName: string;
+  address: string;
+  status: 'Scheduled' | 'Sent' | 'Authorized' | 'Denied' | 'Completed';
+  technician: string;
+  dateCreated: string;
+  items: EstimateLineItem[];
+  photos: string[];
+  notes: string;
+  laborRate: number;
+}
+
+export interface Lead {
+  id: string;
+  name: string;
+  company?: string;
+  email: string;
+  phone?: string;
+  source: string;
+  status: string;
+  notes?: string;
+  dateAdded: string;
 }
 
 export interface AnalysisResult {
@@ -107,54 +129,17 @@ export interface PurchaseRecord {
   source?: string;
 }
 
-// --- CRM TYPES ---
-
-export interface Lead {
+export interface VarianceItem {
   id: string;
-  name: string;
-  company: string;
-  email: string;
-  phone: string;
-  source: 'Outlook' | 'Manual' | 'Referral' | 'Web';
-  status: 'New' | 'Contacted' | 'Qualified' | 'Converted';
-  notes: string;
-  dateAdded: string;
-}
-
-export type OpportunityStage = 'Prospecting' | 'Qualification' | 'Proposal' | 'Negotiation' | 'Closed Won' | 'Closed Lost';
-
-export interface Opportunity {
-  id: string;
-  title: string;
-  clientName: string;
-  value: number;
-  stage: OpportunityStage;
-  closeDate: string;
-  probability: number; // 0-100%
-  owner: string; // Estimator Name
-}
-
-// --- SERVICE & CHANGE ORDER TYPES ---
-
-export interface GeoLocation {
-  lat: number;
-  lng: number;
-  timestamp: string;
-}
-
-export interface ServiceTicket {
-  id: string;
-  type: 'Service Call' | 'Change Order';
-  projectId?: string; // Linked project if Change Order
-  clientName: string;
-  address: string;
-  status: 'Scheduled' | 'In Progress' | 'Sent' | 'Authorized' | 'Denied' | 'Completed' | 'Invoiced';
-  technician: string;
-  dateCreated: string;
-  checkInLocation?: GeoLocation;
-  checkOutLocation?: GeoLocation;
-  photos: string[]; // Base64 images
-  items: EstimateLineItem[];
-  notes: string;
-  laborRate: number; // Service rate is usually higher
+  projectName: string;
+  itemName: string;
+  estimatedQty: number;
+  estimatedUnitCost: number;
+  purchasedQty: number;
+  avgPurchasedCost: number;
+  totalEstimated: number;
+  totalPurchased: number;
+  costVariance: number; // Positive means over budget
+  qtyVariance: number; // Positive means bought more than estimated
+  status: 'OK' | 'Over Budget' | 'Over Quantity' | 'Critical' | 'Unplanned';
 }
