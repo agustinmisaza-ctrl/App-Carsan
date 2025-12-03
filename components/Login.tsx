@@ -7,8 +7,8 @@ interface LoginProps {
   onLogin: (user: User) => void;
 }
 
-// Mock database of users
-const MOCK_USERS = [
+// Initial default users
+const INITIAL_USERS = [
     {
         id: '1',
         username: 'admin',
@@ -47,6 +47,9 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   
+  // User Database State (Persistent)
+  const [users, setUsers] = useState<typeof INITIAL_USERS>([]);
+
   // Change Password State
   const [pendingUser, setPendingUser] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState('');
@@ -57,8 +60,22 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const logoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+      // Load Custom Logo
       const savedLogo = localStorage.getItem('carsan_custom_logo');
       if (savedLogo) setCustomLogo(savedLogo);
+
+      // Load Users
+      const savedUsers = localStorage.getItem('carsan_users');
+      if (savedUsers) {
+          try {
+              setUsers(JSON.parse(savedUsers));
+          } catch (e) {
+              setUsers(INITIAL_USERS);
+          }
+      } else {
+          setUsers(INITIAL_USERS);
+          localStorage.setItem('carsan_users', JSON.stringify(INITIAL_USERS));
+      }
   }, []);
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -79,14 +96,15 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setError('');
     setLoading(true);
 
-    // Simulating a backend authentication delay
     setTimeout(() => {
-      // Find user but cast role safely if needed
-      const userFound = MOCK_USERS.find(u => u.username === username && u.password === password);
+      // Case-insensitive username match
+      const userFound = users.find(u => 
+          u.username.toLowerCase() === username.trim().toLowerCase() && 
+          u.password === password
+      );
 
       if (userFound) {
           if (userFound.mustChangePassword) {
-              // Redirect to change password screen
               const userObj: User = {
                   id: userFound.id,
                   username: userFound.username,
@@ -99,7 +117,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
               setLoading(false);
               setView('CHANGE_PASSWORD');
           } else {
-              // Direct login
               onLogin({
                   id: userFound.id,
                   username: userFound.username,
@@ -110,10 +127,10 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
               });
           }
       } else {
-        setError('Invalid credentials. Please try again.');
+        setError('Invalid credentials. Check username/password.');
         setLoading(false);
       }
-    }, 800);
+    }, 600);
   };
 
   const handleChangePassword = (e: React.FormEvent) => {
@@ -134,14 +151,25 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
       }
 
       setTimeout(() => {
-          // Success: Log the user in with the new status
           if (pendingUser) {
+             // Update the persistent database
+             const updatedUsers = users.map(u => {
+                 if (u.id === pendingUser.id) {
+                     return { ...u, password: newPassword, mustChangePassword: false };
+                 }
+                 return u;
+             });
+             
+             setUsers(updatedUsers);
+             localStorage.setItem('carsan_users', JSON.stringify(updatedUsers));
+
+             // Log in
              onLogin({
                   ...pendingUser,
-                  mustChangePassword: false // Updated status
+                  mustChangePassword: false
               });
           }
-      }, 800);
+      }, 600);
   };
 
   return (
@@ -203,6 +231,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                         onChange={(e) => setUsername(e.target.value)}
                         className="block w-full pl-10 pr-3 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-sm"
                         placeholder="Enter username"
+                        autoCapitalize="none"
                         required
                         />
                     </div>
@@ -226,7 +255,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     </div>
 
                     {error && (
-                    <div className="flex items-center gap-2 text-red-600 bg-red-50 p-3 rounded-lg text-sm">
+                    <div className="flex items-center gap-2 text-red-600 bg-red-50 p-3 rounded-lg text-sm font-medium">
                         <AlertCircle className="w-4 h-4 shrink-0" />
                         {error}
                     </div>
@@ -317,7 +346,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
           <div className="mt-8 pt-6 border-t border-slate-100">
              <div className="text-center text-xs text-slate-400">
-                <p className="font-semibold mb-2">Demo Credentials:</p>
+                <p className="font-semibold mb-2">Default Credentials:</p>
                 <div className="flex flex-col gap-2">
                     <span>Admin: <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-600">admin</code> / <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-600">admin123</code></span>
                     <span>Estimator (Temp): <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-600">carlos</code> / <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-600">temp123</code></span>
