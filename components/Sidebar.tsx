@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
 import { ViewState, User } from '../types';
 import { LayoutDashboard, FileText, Database, FolderOpen, X, LogOut, Users, Download, FileDiff, BarChart2, Upload, Cloud } from 'lucide-react';
@@ -221,11 +220,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isO
                </button>
            </div>
           <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-3 border border-slate-700/50 shadow-sm">
-            <div className="flex items-center gap-2 mb-1">
-                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wide">Miami-Dade</p>
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wide">Miami-Dade</p>
+                </div>
+                <span className="text-[10px] text-slate-600">v1.2</span>
             </div>
-            <p className="text-[10px] text-slate-500">NEC 2020/2023 Compliant</p>
+            <p className="text-[10px] text-slate-500 mt-1">NEC 2023 Compliant</p>
           </div>
         </div>
       </div>

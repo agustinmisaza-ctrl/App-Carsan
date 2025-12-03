@@ -141,8 +141,8 @@ const getProjectValue = (p: ProjectEstimate) => {
     return sub + (sub * 0.25); 
 };
 
-// HARD RESET FLAG - SET TO TRUE ONCE TO CLEAR DATA
-const RESET_APP = true;
+// HARD RESET FLAG - SET TO TRUE ONCE TO CLEAR DATA, THEN FALSE
+const RESET_APP = false;
 
 // Generic Helper to load from LocalStorage
 const loadState = <T,>(key: string, fallback: T): T => {
