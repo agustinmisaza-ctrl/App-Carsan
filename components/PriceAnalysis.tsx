@@ -1,7 +1,8 @@
+
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { PurchaseRecord, MaterialItem, ProjectEstimate, VarianceItem } from '../types';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ScatterChart, Scatter, ComposedChart, Cell } from 'recharts';
-import { Search, TrendingUp, TrendingDown, DollarSign, Calendar, ShoppingCart, Filter, ArrowUp, ArrowDown, Award, FileText, Plus, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, Save, ArrowUpDown, RefreshCw, Download, ArrowRight, Bell, Check, AlertTriangle, PieChart, Sparkles } from 'lucide-react';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ScatterChart, Scatter, ComposedChart, Cell, ReferenceLine } from 'recharts';
+import { Search, TrendingUp, TrendingDown, DollarSign, Calendar, ShoppingCart, Filter, ArrowUp, ArrowDown, Award, FileText, Plus, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, Save, ArrowUpDown, RefreshCw, Download, ArrowRight, Bell, Check, AlertTriangle, PieChart, Sparkles, Percent, ListFilter, Flame } from 'lucide-react';
 import { extractInvoiceData } from '../services/geminiService';
 import * as XLSX from 'xlsx';
 import { parseCurrency } from '../utils/purchaseData';
@@ -21,6 +22,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedProject, setSelectedProject] = useState<string>('All');
   const [selectedType, setSelectedType] = useState<string>('All');
+  const [sortByValue, setSortByValue] = useState(true); // Default to Pareto sorting
   
   // Date Range Filter
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
@@ -63,6 +65,46 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
   const uniqueSuppliers = Array.from(new Set(purchases.map(p => p.supplier))).filter((s): s is string => !!s).sort();
   const uniqueItemNames = Array.from(new Set(purchases.map(p => p.itemDescription))).filter((i): i is string => !!i).sort();
   
+  // --- PARETO ANALYSIS LOGIC ---
+  const processedItemsList = useMemo(() => {
+      // 1. Aggregate Total Spend per Item
+      const itemMap = new Map<string, { total: number, count: number }>();
+      purchases.forEach(p => {
+          const name = p.itemDescription || 'Unknown';
+          if (!itemMap.has(name)) itemMap.set(name, { total: 0, count: 0 });
+          const curr = itemMap.get(name)!;
+          curr.total += p.totalCost || 0;
+          curr.count += 1;
+      });
+
+      // 2. Convert to Array
+      let items = Array.from(itemMap.entries()).map(([name, data]) => ({
+          name,
+          total: data.total,
+          count: data.count
+      }));
+
+      // 3. Filter by Search
+      if (searchTerm) {
+          items = items.filter(i => i.name.toLowerCase().includes(searchTerm.toLowerCase()));
+      }
+
+      // 4. Sort
+      if (sortByValue) {
+          // Pareto Sort: High Value First
+          items.sort((a, b) => b.total - a.total);
+      } else {
+          // Alphabetical
+          items.sort((a, b) => a.name.localeCompare(b.name));
+      }
+
+      return items;
+  }, [purchases, searchTerm, sortByValue]);
+
+  // Calculate Top 20% Cutoff for Pareto visual
+  const paretoCutoffIndex = Math.floor(processedItemsList.length * 0.2);
+
+
   // Clear notification after 5 seconds
   useEffect(() => {
       if (notification) {
@@ -113,6 +155,60 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
 
       return result;
   }, [purchases, searchTerm, selectedProject, selectedType, dateRange, sortConfig, activeTab]);
+
+  // --- SUPPLIER COMPETITIVENESS SCORECARD ---
+  const supplierScorecard = useMemo(() => {
+      if (purchases.length === 0) return [];
+
+      // 1. Calculate Global Average Price for every item
+      const itemStats: Record<string, { totalCost: number, count: number, avg: number }> = {};
+      
+      purchases.forEach(p => {
+          const key = p.itemDescription.trim().toLowerCase();
+          if (!itemStats[key]) itemStats[key] = { totalCost: 0, count: 0, avg: 0 };
+          itemStats[key].totalCost += p.unitCost;
+          itemStats[key].count += 1;
+      });
+
+      // Finalize averages
+      Object.keys(itemStats).forEach(k => {
+          itemStats[k].avg = itemStats[k].totalCost / itemStats[k].count;
+      });
+
+      // 2. Score Suppliers
+      const supplierStats: Record<string, { totalVariancePct: number, itemsCount: number }> = {};
+
+      purchases.forEach(p => {
+          const key = p.itemDescription.trim().toLowerCase();
+          const marketAvg = itemStats[key].avg;
+          
+          if (marketAvg > 0 && p.unitCost > 0) {
+              // Calculate variance % (e.g. Paid $90 vs Avg $100 = -10% variance)
+              const variance = ((p.unitCost - marketAvg) / marketAvg) * 100;
+              
+              if (!supplierStats[p.supplier]) supplierStats[p.supplier] = { totalVariancePct: 0, itemsCount: 0 };
+              
+              supplierStats[p.supplier].totalVariancePct += variance;
+              supplierStats[p.supplier].itemsCount += 1;
+          }
+      });
+
+      // 3. Convert to Array and Sort
+      return Object.keys(supplierStats).map(supplier => {
+          const stats = supplierStats[supplier];
+          // Average variance across all items purchased
+          const score = stats.totalVariancePct / stats.itemsCount;
+          return {
+              name: supplier,
+              score: score, // Negative = Cheaper than avg, Positive = More expensive
+              itemsCount: stats.itemsCount
+          };
+      })
+      .filter(s => s.itemsCount > 2) // Filter out suppliers with very few data points
+      .sort((a, b) => a.score - b.score); // Sort cheapest to most expensive
+
+  }, [purchases]);
+
 
   // --- VARIANCE ANALYSIS LOGIC (ESTIMATED VS ACTUAL) ---
   const varianceData = useMemo(() => {
@@ -284,8 +380,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
           if (!updates.has(key)) {
               updates.set(key, { cost: p.unitCost, count: 1 });
           } else {
-              // Simple average or take latest? Let's take latest by assuming purchase list is chronological or just update
-              // Ideally we check dates. For simplicity, let's assume valid unitCost > 0
               if (p.unitCost > 0) updates.set(key, { cost: p.unitCost, count: 1 });
           }
       });
@@ -299,13 +393,11 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
           const existingIdx = newMaterials.findIndex(m => m.name.toLowerCase() === name.toLowerCase());
           
           if (existingIdx >= 0) {
-              // Update existing
               if (newMaterials[existingIdx].materialCost !== val.cost) {
                   newMaterials[existingIdx] = { ...newMaterials[existingIdx], materialCost: val.cost };
                   updatedCount++;
               }
           } else {
-              // Add new
               newMaterials.push({
                   id: `gen-${Date.now()}-${Math.random()}`,
                   name: name,
@@ -337,10 +429,8 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
           setIsQBSyncing(true);
           const url = await connectToQuickBooks();
           if (url.startsWith('http')) {
-              // Redirect to OAuth
               window.location.href = url; 
           } else {
-              // Simulation
               showNotification('info', "Simulation: Fetching QB Data...");
               const bills = await fetchQuickBooksBills();
               if (setPurchases) {
@@ -467,6 +557,38 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                   </div>
               </div>
 
+              {/* SUPPLIER COMPETITIVENESS SCORECARD */}
+              {!selectedItem && supplierScorecard.length > 0 && (
+                  <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-6">
+                      <div className="flex items-center justify-between mb-4">
+                          <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                              <Award className="w-5 h-5 text-purple-500" /> Supplier Competitiveness Scorecard
+                          </h3>
+                          <p className="text-xs text-slate-400">Compares suppliers based on shared items (Market Avg = 0%)</p>
+                      </div>
+                      <div className="h-64 w-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                              <BarChart data={supplierScorecard} layout="horizontal" margin={{top: 20, bottom: 20}}>
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                  <XAxis dataKey="name" tick={{fontSize: 11}} />
+                                  <YAxis tickFormatter={(val) => `${val}%`} />
+                                  <Tooltip formatter={(val: number) => [`${val.toFixed(1)}%`, 'Price Variance']} />
+                                  <ReferenceLine y={0} stroke="#000" />
+                                  <Bar dataKey="score" barSize={40} radius={[4, 4, 0, 0]}>
+                                      {supplierScorecard.map((entry, index) => (
+                                          <Cell key={`cell-${index}`} fill={entry.score <= 0 ? '#10b981' : '#ef4444'} />
+                                      ))}
+                                  </Bar>
+                              </BarChart>
+                          </ResponsiveContainer>
+                      </div>
+                      <div className="flex justify-center gap-6 text-xs text-slate-500 mt-2">
+                          <div className="flex items-center gap-1"><div className="w-3 h-3 bg-emerald-500 rounded"></div> Cheaper than Average</div>
+                          <div className="flex items-center gap-1"><div className="w-3 h-3 bg-red-500 rounded"></div> More Expensive than Average</div>
+                      </div>
+                  </div>
+              )}
+
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   {/* Item List (Left Panel) */}
                   <div className={`lg:col-span-1 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col h-[500px] ${showMobileSelector ? 'fixed inset-0 z-50 m-0 rounded-none' : 'relative hidden lg:flex'}`}>
@@ -476,20 +598,36 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                               <button onClick={() => setShowMobileSelector(false)}><X className="w-6 h-6" /></button>
                           </div>
                       )}
-                      <div className="p-4 border-b border-slate-100">
-                          <h3 className="font-bold text-slate-800">Purchased Items</h3>
-                          <p className="text-xs text-slate-500">Select to analyze trends</p>
+                      <div className="p-4 border-b border-slate-100 flex justify-between items-center">
+                          <div>
+                              <h3 className="font-bold text-slate-800">Purchased Items</h3>
+                              <p className="text-xs text-slate-500">Sorted by {sortByValue ? 'Value (Pareto)' : 'Name'}</p>
+                          </div>
+                          <button 
+                              onClick={() => setSortByValue(!sortByValue)} 
+                              className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"
+                              title={`Sort by ${sortByValue ? 'Name' : 'Value'}`}
+                          >
+                              <ListFilter className="w-4 h-4" />
+                          </button>
                       </div>
                       <div className="flex-1 overflow-y-auto custom-scrollbar">
-                          {uniqueItemNames.filter(name => name.toLowerCase().includes(searchTerm.toLowerCase())).map((item, idx) => (
-                              <button 
-                                  key={idx}
-                                  onClick={() => { setSelectedItem(item); setShowMobileSelector(false); }}
-                                  className={`w-full text-left px-4 py-3 text-sm border-b border-slate-50 hover:bg-blue-50 transition-colors ${selectedItem === item ? 'bg-blue-50 text-blue-700 font-bold border-l-4 border-l-blue-500' : 'text-slate-600'}`}
-                              >
-                                  {item}
-                              </button>
-                          ))}
+                          {processedItemsList.map((item, idx) => {
+                              const isTopPareto = sortByValue && idx < paretoCutoffIndex;
+                              return (
+                                  <button 
+                                      key={idx}
+                                      onClick={() => { setSelectedItem(item.name); setShowMobileSelector(false); }}
+                                      className={`w-full text-left px-4 py-3 text-sm border-b border-slate-50 hover:bg-blue-50 transition-colors flex justify-between items-center group ${selectedItem === item.name ? 'bg-blue-50 text-blue-700 font-bold border-l-4 border-l-blue-500' : 'text-slate-600'}`}
+                                  >
+                                      <span className="truncate flex-1">{item.name}</span>
+                                      <div className="flex items-center gap-2 text-xs">
+                                          <span className="text-slate-400">${item.total.toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+                                          {isTopPareto && <Flame className="w-3 h-3 text-orange-500" />}
+                                      </div>
+                                  </button>
+                              );
+                          })}
                       </div>
                   </div>
 
@@ -555,7 +693,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                           </>
                       ) : (
                           <div className="h-full flex items-center justify-center bg-slate-50 rounded-xl border border-dashed border-slate-300 text-slate-400">
-                              <p>Select an item from the list to view analysis.</p>
+                              <p>Select an item from the list to view price history analysis.</p>
                           </div>
                       )}
                   </div>
@@ -832,3 +970,4 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
     </div>
   );
 };
+    

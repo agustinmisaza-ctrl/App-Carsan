@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Login } from './components/Login';
@@ -33,7 +34,7 @@ const loadState = <T,>(key: string, fallback: T): T => {
 export const App: React.FC = () => {
     // Log Version for debugging
     useEffect(() => {
-        console.log("Carsan Electric App v3.1 - Force Fix");
+        console.log("Carsan Electric App v3.2 - Tax Fix");
         
         // Auto-load data if connected (Mock implementation of auto-load)
         const loadCloudData = async () => {

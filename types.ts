@@ -1,3 +1,4 @@
+
 export enum ViewState {
   DASHBOARD = 'DASHBOARD',
   PROJECTS = 'PROJECTS',
@@ -122,6 +123,7 @@ export interface PurchaseRecord {
   itemDescription: string;
   quantity: number;
   unitCost: number;
+  tax?: number;
   totalCost: number;
   supplier: string;
   projectName: string;

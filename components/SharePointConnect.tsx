@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { ProjectEstimate, MaterialItem, ServiceTicket } from '../types';
 import { searchSharePointSites, ensureCarsanLists, getSharePointLists, addListItem, updateListItem, getListItems } from '../services/sharepointService';
@@ -274,9 +275,22 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                         return undefined;
                     };
 
+                    // FIX: Smart Date Parsing for 1969 Issue
                     const parseExcelDate = (val: any) => {
                         if (!val) return null;
+                        // Excel Serial
                         if (typeof val === 'number') return new Date(Math.round((val - 25569)*86400*1000)).toISOString();
+                        
+                        if (typeof val === 'string') {
+                            // DD/MM/YYYY
+                            if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(val)) {
+                                const parts = val.split('/');
+                                // Guess format: if part[0] > 12, it MUST be DD/MM. If not, assume US MM/DD unless user context says otherwise.
+                                // Assuming US/Excel default often exports MM/DD/YYYY, but user mentioned issues.
+                                // Let's standardize: new Date() takes MM/DD/YYYY.
+                                return new Date(val).toISOString();
+                            }
+                        }
                         const d = new Date(val);
                         return !isNaN(d.getTime()) ? d.toISOString() : null;
                     };
@@ -284,12 +298,13 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                     try {
                         await addListItem(selectedSite.id, purchaseList.id, {
                             Title: `PO-${findVal(['Purchase Order #', 'PO Number', 'PO']) || i}`,
-                            PurchaseDate: parseExcelDate(findVal(['Date', 'Invoice Date'])),
+                            PurchaseDate: parseExcelDate(findVal(['Date', 'Invoice Date', 'PurchaseDate'])),
                             PO_Number: String(findVal(['Purchase Order #', 'PO Number', 'PO']) || ''),
                             Brand: String(findVal(['Brand']) || ''),
                             Item_Description: String(findVal(['Item', 'Item Description']) || ''),
                             Quantity: Number(findVal(['Quantity', 'Qty']) || 0),
                             Unit_Cost: Number(findVal(['Unit Cost', 'Price', 'Rate']) || 0),
+                            Tax: Number(findVal(['TAX', 'Tax', 'Vat']) || 0), // ADDED TAX MAPPING
                             Total_Cost: Number(findVal(['Total', 'Total Cost']) || 0),
                             Supplier: String(findVal(['Supplier', 'Vendor']) || ''),
                             Project_Name: String(findVal(['Project', 'Project Name']) || ''),

@@ -1,3 +1,4 @@
+
 import { getGraphToken } from "./emailIntegration";
 import { PurchaseRecord, ProjectEstimate } from "../types";
 
@@ -107,6 +108,7 @@ export const getAllPurchaseRecords = async (siteId: string): Promise<PurchaseRec
                 itemDescription: f.Item_Description,
                 quantity: f.Quantity,
                 unitCost: f.Unit_Cost,
+                tax: f.Tax,
                 totalCost: f.Total_Cost,
                 supplier: f.Supplier,
                 projectName: f.Project_Name,
@@ -272,6 +274,7 @@ export const ensureCarsanLists = async (siteId: string, forceToken = false) => {
     ], forceToken);
 
     // 3. Purchase History List (For Price Analysis)
+    // ADDED TAX COLUMN
     await createSharePointList(siteId, 'Carsan_Purchases', [
         { name: 'PurchaseDate', dateTime: {} },
         { name: 'PO_Number', text: {} },
@@ -279,6 +282,7 @@ export const ensureCarsanLists = async (siteId: string, forceToken = false) => {
         { name: 'Item_Description', text: {} },
         { name: 'Quantity', number: {} },
         { name: 'Unit_Cost', number: {} },
+        { name: 'Tax', number: {} }, 
         { name: 'Total_Cost', number: {} },
         { name: 'Supplier', text: {} },
         { name: 'Project_Name', text: {} },
