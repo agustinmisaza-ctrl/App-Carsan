@@ -58,12 +58,31 @@ const initializeMsal = async () => {
 
 export const signOut = async () => {
     const msal = await initializeMsal();
-    // Clear all account data
+    // Aggressive cleanup
     const accounts = msal.getAllAccounts();
     if (accounts.length > 0) {
-        await msal.logoutPopup();
+        // Just clear cache, don't necessarily need full redirect logout if we clear storage
+        // But logoutPopup is cleaner for MS session
+        try {
+            await msal.logoutPopup();
+        } catch (e) {
+            console.warn("Logout popup failed or cancelled", e);
+        }
     }
+    
+    // Nuke all storage
     sessionStorage.clear();
+    
+    // Clear LocalStorage MSAL keys specifically
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.includes('msal') || key.includes('authority'))) {
+            keysToRemove.push(key);
+        }
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+    
     msalInstance = null;
 };
 
@@ -84,12 +103,17 @@ export const getGraphToken = async (scopes: string[], forceInteractive: boolean 
             });
             return response.accessToken;
         } catch (e) {
+            console.warn("Silent token acquisition failed, attempting interactive...", e);
             // Silent failed, try popup
-            const response = await msal.loginPopup({ scopes });
+            // CRITICAL CHANGE: Use acquireTokenPopup, NOT loginPopup
+            const response = await msal.acquireTokenPopup({ scopes, account });
             return response.accessToken;
         }
     } else {
-        const response = await msal.loginPopup({ scopes });
+        // Interactive required or forced
+        console.log("Acquiring token interactively (forced or no account)...");
+        // CRITICAL CHANGE: Use acquireTokenPopup to ensure scopes are granted
+        const response = await msal.acquireTokenPopup({ scopes });
         return response.accessToken;
     }
 };
@@ -126,6 +150,12 @@ export const fetchOutlookEmails = async (): Promise<Lead[]> => {
         });
 
         if (!response.ok) {
+            // Check for AADSTS50011 specifically in error body if possible
+            try {
+                const errJson = await response.json();
+                console.error("Graph API Error Body:", errJson);
+            } catch (e) {}
+            
             throw new Error(`Graph API Error: ${response.statusText}`);
         }
 

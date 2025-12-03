@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { Cloud, Check, Loader2, Database, AlertTriangle, RefreshCw, Globe, ChevronRight, Settings, Save, Copy, LogOut, ShieldAlert } from 'lucide-react';
 import { searchSharePointSites, ensureCarsanLists, addListItem, getSharePointLists, getListItems, updateListItem, SPSite } from '../services/sharepointService';
@@ -135,6 +134,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         } catch (e: any) {
             setStatus('Error creating lists.');
             setRawError(e.message || JSON.stringify(e));
+            console.error("FULL INIT ERROR:", e); // Debug logging
             
             if (e.message.includes('Sites.ReadWrite.All') || e.message.includes('Access Denied') || e.message.includes('403')) {
                 setPermissionError(true);
