@@ -33,7 +33,7 @@ const loadState = <T,>(key: string, fallback: T): T => {
 export const App: React.FC = () => {
     // Log Version for debugging
     useEffect(() => {
-        console.log("Carsan Electric App v2.3 - CRM Upgrade");
+        console.log("Carsan Electric App v2.5 - Service Dashboard Restoration");
     }, []);
 
     const [user, setUser] = useState<User | null>(null);
@@ -61,8 +61,11 @@ export const App: React.FC = () => {
     };
 
     const handleLogout = () => {
+        // Clear Microsoft session tokens
+        import('./services/emailIntegration').then(m => m.signOut());
         setUser(null);
         setCurrentView(ViewState.DASHBOARD);
+        window.location.reload();
     };
 
     if (!user) {
@@ -74,60 +77,109 @@ export const App: React.FC = () => {
             case ViewState.DASHBOARD:
                 return (
                     <div className="p-4 md:p-8 max-w-7xl mx-auto">
-                        <h1 className="text-3xl font-bold mb-6 text-slate-900">Dashboard</h1>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                            {/* Finance Card */}
+                        <h1 className="text-3xl font-bold mb-6 text-slate-900">Command Center</h1>
+                        
+                        {/* 1. Revenue Overview */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                                 <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Revenue Won (YTD)</h3>
                                 <p className="text-2xl font-bold text-emerald-600">
                                     ${projects.filter(p => p.status === 'Won').reduce((sum, p) => sum + (p.contractValue || 0), 0).toLocaleString()}
                                 </p>
                             </div>
-                            
-                            {/* Operations Card */}
                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Active Projects</h3>
-                                <div className="flex items-baseline gap-2">
-                                    <p className="text-3xl font-bold text-slate-900">{projects.filter(p => p.status === 'Ongoing').length}</p>
-                                    <span className="text-xs text-slate-400">Ongoing</span>
-                                </div>
+                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Pipeline Value</h3>
+                                <p className="text-2xl font-bold text-blue-600">
+                                    ${projects.filter(p => p.status === 'Draft' || p.status === 'Sent').reduce((sum, p) => sum + (p.contractValue || 0), 0).toLocaleString()}
+                                </p>
                             </div>
-
-                            {/* Estimating Card */}
                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Pending Estimates</h3>
-                                <p className="text-3xl font-bold text-blue-600">{projects.filter(p => p.status === 'Draft' || p.status === 'Sent').length}</p>
+                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Service Revenue</h3>
+                                <p className="text-2xl font-bold text-indigo-600">
+                                    ${tickets.filter(t => t.status === 'Authorized' || t.status === 'Completed').reduce((sum, t) => {
+                                        const mat = t.items.reduce((s, i) => s + (i.quantity * i.unitMaterialCost), 0);
+                                        const lab = t.items.reduce((s, i) => s + (i.quantity * i.unitLaborHours * t.laborRate), 0);
+                                        return sum + mat + lab;
+                                    }, 0).toLocaleString()}
+                                </p>
                             </div>
-
-                            {/* Service Card */}
                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Service Tickets</h3>
-                                <p className="text-3xl font-bold text-slate-900">{tickets.filter(t => t.status !== 'Completed').length}</p>
+                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Purchase Spend</h3>
+                                <p className="text-2xl font-bold text-slate-700">
+                                    ${purchases.reduce((sum, p) => sum + p.totalCost, 0).toLocaleString()}
+                                </p>
                             </div>
                         </div>
 
-                        {/* Action Items */}
-                        <div className="mt-8 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                                <span className="w-2 h-2 rounded-full bg-orange-500"></span> Action Items: Follow Ups
-                            </h3>
-                            <div className="space-y-3">
-                                {projects
-                                    .filter(p => p.followUpDate && new Date(p.followUpDate) <= new Date() && !['Won', 'Lost', 'Completed'].includes(p.status))
-                                    .map(p => (
-                                        <div key={p.id} className="flex justify-between items-center p-3 bg-orange-50 rounded-lg border border-orange-100">
-                                            <div>
-                                                <p className="font-bold text-slate-800 text-sm">{p.name}</p>
-                                                <p className="text-xs text-orange-600">Due for follow up: {new Date(p.followUpDate!).toLocaleDateString()}</p>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                            
+                            {/* 2. Action Items (Follow Ups) */}
+                            <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                                <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse"></span> Projects Due for Follow-Up
+                                </h3>
+                                <div className="space-y-3">
+                                    {projects
+                                        .filter(p => p.followUpDate && new Date(p.followUpDate) <= new Date() && !['Won', 'Lost', 'Completed'].includes(p.status))
+                                        .map(p => (
+                                            <div key={p.id} className="flex justify-between items-center p-3 bg-orange-50 rounded-lg border border-orange-100 hover:bg-orange-100 transition cursor-pointer" onClick={() => { setCurrentView(ViewState.PROJECTS); }}>
+                                                <div>
+                                                    <p className="font-bold text-slate-800 text-sm">{p.name}</p>
+                                                    <p className="text-xs text-orange-700">Due: {new Date(p.followUpDate!).toLocaleDateString()} • {p.client}</p>
+                                                </div>
+                                                <button className="text-xs bg-white border border-orange-200 text-orange-700 px-3 py-1.5 rounded font-bold hover:shadow-sm">
+                                                    Open
+                                                </button>
                                             </div>
-                                            <button className="text-xs bg-white border border-orange-200 text-orange-700 px-3 py-1.5 rounded font-bold hover:bg-orange-100">
-                                                Contact Client
-                                            </button>
+                                        ))}
+                                    {projects.filter(p => p.followUpDate && new Date(p.followUpDate) <= new Date() && !['Won', 'Lost', 'Completed'].includes(p.status)).length === 0 && (
+                                        <div className="p-8 text-center text-slate-400 italic bg-slate-50 rounded-lg border border-dashed border-slate-200">
+                                            No pending follow-ups today. Great job!
                                         </div>
-                                    ))}
-                                {projects.filter(p => p.followUpDate && new Date(p.followUpDate) <= new Date() && !['Won', 'Lost', 'Completed'].includes(p.status)).length === 0 && (
-                                    <p className="text-sm text-slate-400 italic">No pending follow-ups today.</p>
-                                )}
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* 3. Operational Snapshot */}
+                            <div className="space-y-6">
+                                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                                    <h3 className="font-bold text-slate-800 mb-4">Operations</h3>
+                                    <div className="space-y-4">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-sm text-slate-600">Active Projects (Ongoing)</span>
+                                            <span className="font-bold text-slate-900 bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs">
+                                                {projects.filter(p => p.status === 'Ongoing').length}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-sm text-slate-600">Pending Change Orders</span>
+                                            <span className="font-bold text-slate-900 bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs">
+                                                {tickets.filter(t => t.status === 'Sent').length}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-sm text-slate-600">Open Leads</span>
+                                            <span className="font-bold text-slate-900 bg-slate-100 text-slate-800 px-2 py-0.5 rounded text-xs">
+                                                {leads.length}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-slate-900 text-white p-6 rounded-xl shadow-lg">
+                                    <h3 className="font-bold text-lg mb-2">Quick Actions</h3>
+                                    <div className="space-y-2">
+                                        <button onClick={() => setCurrentView(ViewState.ESTIMATE_NEW)} className="w-full text-left px-3 py-2 hover:bg-white/10 rounded-lg text-sm transition">
+                                            + New Estimate
+                                        </button>
+                                        <button onClick={() => setCurrentView(ViewState.SERVICE)} className="w-full text-left px-3 py-2 hover:bg-white/10 rounded-lg text-sm transition">
+                                            + New Change Order
+                                        </button>
+                                        <button onClick={() => setCurrentView(ViewState.CRM)} className="w-full text-left px-3 py-2 hover:bg-white/10 rounded-lg text-sm transition">
+                                            + Add CRM Lead
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

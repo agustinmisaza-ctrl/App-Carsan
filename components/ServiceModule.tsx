@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { ServiceTicket, User, MaterialItem, ProjectEstimate, EstimateLineItem } from '../types';
-import { Camera, Plus, Clock, CheckCircle, ChevronLeft, Trash2, FileDiff, Sparkles, Loader2, AlertTriangle, Mail, BellRing, Download, Paperclip } from 'lucide-react';
+import { Camera, Plus, Clock, CheckCircle, ChevronLeft, Trash2, FileDiff, Sparkles, Loader2, AlertTriangle, Mail, BellRing, Download, Paperclip, AlertOctagon, TrendingUp } from 'lucide-react';
 import { jsPDF } from "jspdf";
 import autoTable from 'jspdf-autotable';
 import { generateInvoiceFromNotes } from '../services/geminiService';
@@ -42,6 +42,16 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
   };
 
   const staleTickets = myTickets.filter(isStale);
+
+  // --- CALCULATION HELPERS ---
+  const calculateTotal = (ticket: ServiceTicket) => {
+      const mat = ticket.items.reduce((sum, i) => sum + (i.quantity * i.unitMaterialCost), 0);
+      const lab = ticket.items.reduce((sum, i) => sum + (i.quantity * i.unitLaborHours * i.laborRate), 0);
+      return mat + lab;
+  };
+
+  const totalPending = myTickets.filter(t => t.status === 'Sent').reduce((sum, t) => sum + calculateTotal(t), 0);
+  const totalApproved = myTickets.filter(t => t.status === 'Authorized').reduce((sum, t) => sum + calculateTotal(t), 0);
 
   // --- PHOTO LOGIC ---
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -158,12 +168,6 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
   const updateTicket = (ticket: ServiceTicket) => {
       setTickets(tickets.map(t => t.id === ticket.id ? ticket : t));
       setActiveTicket(ticket);
-  };
-
-  const calculateTotal = (ticket: ServiceTicket) => {
-      const mat = ticket.items.reduce((sum, i) => sum + (i.quantity * i.unitMaterialCost), 0);
-      const lab = ticket.items.reduce((sum, i) => sum + (i.quantity * i.unitLaborHours * i.laborRate), 0);
-      return mat + lab;
   };
 
   const handleCreateChangeOrder = () => {
@@ -297,6 +301,14 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
       alert("Step 1: PDF Downloaded.\nStep 2: Email Draft Opened.\n\nPlease attach the downloaded PDF to the email draft.");
   };
 
+  const sendReminder = (ticket: ServiceTicket) => {
+      const project = projects.find(p => p.id === ticket.projectId);
+      const email = project?.contactInfo?.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/gi)?.[0] || '';
+      const subject = `REMINDER: Approval Needed for Change Order #${ticket.id}`;
+      const body = `Hi ${ticket.clientName},\n\nThis is a friendly reminder that Change Order #${ticket.id} ($${calculateTotal(ticket).toFixed(2)}) is still pending approval.\n\nPlease review at your earliest convenience.\n\nThank you,\nCarsan Electric`;
+      window.open(`mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
+  };
+
   // --- VIEW: TICKET DETAIL ---
   if (activeTicket) {
       const total = calculateTotal(activeTicket);
@@ -412,7 +424,7 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
                                   value={techNotes}
                                   onChange={(e) => setTechNotes(e.target.value)}
                                   className="w-full border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-                                  placeholder="Describe work done..."
+                                  placeholder="Describe work done... e.g. Installed 5 GFCI outlets and used 50ft of wire."
                                   rows={2}
                               />
                               <button 
@@ -481,7 +493,7 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
   // --- VIEW: DASHBOARD ---
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
           <div>
             <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Change Orders</h1>
             <p className="text-slate-500 mt-1">Manage project scope changes and T&M.</p>
@@ -491,39 +503,92 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
           </button>
       </div>
 
-      {/* MAIN GRID */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {myTickets.map(ticket => (
-              <div 
-                  key={ticket.id} 
-                  onClick={() => setActiveTicket(ticket)}
-                  className={`bg-white rounded-xl shadow-sm border p-5 hover:shadow-md transition cursor-pointer group relative overflow-hidden ${
-                      isStale(ticket) ? 'border-red-300' : 'border-slate-200'
-                  }`}
-              >
-                  <div className={`absolute top-0 left-0 w-1 h-full ${ticket.status === 'Sent' ? 'bg-blue-500' : 'bg-slate-200'}`}></div>
-                  <div className="flex justify-between items-start mb-3">
-                      <div>
-                          <h3 className="font-bold text-slate-900">{ticket.clientName}</h3>
-                          <p className="text-xs text-slate-500">{ticket.address}</p>
+      {/* KPIS */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
+              <div className="absolute right-0 top-0 p-4 opacity-10"><AlertOctagon className="w-16 h-16 text-blue-500" /></div>
+              <p className="text-xs font-bold text-slate-400 uppercase">Pending Approval</p>
+              <p className="text-2xl font-bold text-blue-600 mt-1">${totalPending.toLocaleString()}</p>
+              <p className="text-xs text-slate-400 mt-2">{myTickets.filter(t => t.status === 'Sent').length} tickets waiting</p>
+          </div>
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
+              <div className="absolute right-0 top-0 p-4 opacity-10"><TrendingUp className="w-16 h-16 text-emerald-500" /></div>
+              <p className="text-xs font-bold text-slate-400 uppercase">Approved (Total)</p>
+              <p className="text-2xl font-bold text-emerald-600 mt-1">${totalApproved.toLocaleString()}</p>
+              <p className="text-xs text-slate-400 mt-2">{myTickets.filter(t => t.status === 'Authorized').length} tickets authorized</p>
+          </div>
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+              <p className="text-xs font-bold text-slate-400 uppercase">Stale Tickets</p>
+              <p className="text-2xl font-bold text-red-500 mt-1">{staleTickets.length}</p>
+              <p className="text-xs text-slate-400 mt-2">Sent &gt; 8 days ago</p>
+          </div>
+      </div>
+
+      {/* NEEDS ATTENTION SECTION */}
+      {staleTickets.length > 0 && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-6">
+              <h3 className="font-bold text-red-800 mb-4 flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5" /> Needs Attention (Old Tickets)
+              </h3>
+              <div className="space-y-3">
+                  {staleTickets.map(ticket => (
+                      <div key={ticket.id} className="bg-white p-3 rounded-lg border border-red-100 flex justify-between items-center shadow-sm">
+                          <div>
+                              <p className="font-bold text-slate-800">{ticket.clientName}</p>
+                              <p className="text-xs text-slate-500">Sent: {new Date(ticket.dateCreated).toLocaleDateString()}</p>
+                          </div>
+                          <button 
+                              onClick={() => sendReminder(ticket)}
+                              className="px-3 py-1.5 bg-red-100 text-red-700 rounded-lg text-xs font-bold hover:bg-red-200 flex items-center gap-2 transition"
+                          >
+                              <BellRing className="w-3 h-3" /> Send Reminder
+                          </button>
                       </div>
-                      <span className={`text-[10px] px-2 py-1 rounded-full font-bold uppercase ${
-                          ticket.status === 'Authorized' ? 'bg-green-100 text-green-700' : 
-                          ticket.status === 'Denied' ? 'bg-red-100 text-red-700' :
-                          'bg-slate-100 text-slate-500'
-                      }`}>
-                          {ticket.status}
-                      </span>
-                  </div>
-                  <div className="border-t border-slate-100 pt-3 flex justify-between items-center text-sm">
-                      <div className="flex items-center gap-1 text-slate-500">
-                          <Clock className="w-3.5 h-3.5" />
-                          <span className="text-xs">{new Date(ticket.dateCreated).toLocaleDateString()}</span>
-                      </div>
-                      <span className="font-bold text-slate-900">${calculateTotal(ticket).toLocaleString()}</span>
-                  </div>
+                  ))}
               </div>
-          ))}
+          </div>
+      )}
+
+      {/* MAIN GRID */}
+      <div>
+          <h3 className="font-bold text-slate-800 mb-4">All Tickets</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {myTickets.map(ticket => (
+                  <div 
+                      key={ticket.id} 
+                      onClick={() => setActiveTicket(ticket)}
+                      className={`bg-white rounded-xl shadow-sm border p-5 hover:shadow-md transition cursor-pointer group relative overflow-hidden ${
+                          isStale(ticket) ? 'border-red-300' : 'border-slate-200'
+                      }`}
+                  >
+                      <div className={`absolute top-0 left-0 w-1 h-full ${
+                          ticket.status === 'Authorized' ? 'bg-emerald-500' :
+                          ticket.status === 'Sent' ? 'bg-blue-500' : 'bg-slate-200'
+                      }`}></div>
+                      <div className="flex justify-between items-start mb-3">
+                          <div>
+                              <h3 className="font-bold text-slate-900">{ticket.clientName}</h3>
+                              <p className="text-xs text-slate-500 truncate max-w-[150px]">{ticket.address}</p>
+                          </div>
+                          <span className={`text-[10px] px-2 py-1 rounded-full font-bold uppercase ${
+                              ticket.status === 'Authorized' ? 'bg-green-100 text-green-700' : 
+                              ticket.status === 'Denied' ? 'bg-red-100 text-red-700' :
+                              ticket.status === 'Sent' ? 'bg-blue-100 text-blue-700' :
+                              'bg-slate-100 text-slate-500'
+                          }`}>
+                              {ticket.status}
+                          </span>
+                      </div>
+                      <div className="border-t border-slate-100 pt-3 flex justify-between items-center text-sm">
+                          <div className="flex items-center gap-1 text-slate-500">
+                              <Clock className="w-3.5 h-3.5" />
+                              <span className="text-xs">{new Date(ticket.dateCreated).toLocaleDateString()}</span>
+                          </div>
+                          <span className="font-bold text-slate-900">${calculateTotal(ticket).toLocaleString()}</span>
+                      </div>
+                  </div>
+              ))}
+          </div>
       </div>
     </div>
   );
