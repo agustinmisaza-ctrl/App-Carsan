@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Login } from './components/Login';
@@ -11,6 +10,7 @@ import { PriceAnalysis } from './components/PriceAnalysis';
 import { AIAssistant } from './components/AIAssistant';
 import { SharePointConnect } from './components/SharePointConnect';
 import { ViewState, User, ProjectEstimate, MaterialItem, ServiceTicket, PurchaseRecord } from './types';
+import { getAllPurchaseRecords } from './services/sharepointService';
 
 // Configuration constant
 const RESET_APP = false;
@@ -33,7 +33,13 @@ const loadState = <T,>(key: string, fallback: T): T => {
 export const App: React.FC = () => {
     // Log Version for debugging
     useEffect(() => {
-        console.log("Carsan Electric App v2.5 - Service Dashboard Restoration");
+        console.log("Carsan Electric App v3.1 - Force Fix");
+        
+        // Auto-load data if connected (Mock implementation of auto-load)
+        const loadCloudData = async () => {
+            // Check local storage for site ID if you saved it, otherwise this needs context
+            // For now, we rely on the manual Sync in SharePointConnect tab unless we persist siteId
+        };
     }, []);
 
     const [user, setUser] = useState<User | null>(null);

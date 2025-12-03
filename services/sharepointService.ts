@@ -1,5 +1,5 @@
-
 import { getGraphToken } from "./emailIntegration";
+import { PurchaseRecord, ProjectEstimate } from "../types";
 
 // Types for Internal SharePoint Data
 export interface SPSite {
@@ -82,6 +82,77 @@ export const getListItems = async (siteId: string, listId: string): Promise<SPIt
     return data.value;
 };
 
+// --- DATA FETCHING HELPERS ---
+
+export const getAllPurchaseRecords = async (siteId: string): Promise<PurchaseRecord[]> => {
+    try {
+        const lists = await getSharePointLists(siteId);
+        const purchaseList = lists.find(l => l.displayName === 'Carsan_Purchases');
+        if(!purchaseList) return [];
+
+        const items = await getListItems(siteId, purchaseList.id);
+        
+        return items.map(item => {
+            const f = item.fields;
+            // Prefer SharePoint columns, fall back to JSON blob
+            let base = {};
+            try { base = JSON.parse(f.JSON_Data || '{}'); } catch(e) {}
+
+            return {
+                ...base,
+                id: item.id,
+                date: f.PurchaseDate || f.Created,
+                poNumber: f.PO_Number,
+                brand: f.Brand,
+                itemDescription: f.Item_Description,
+                quantity: f.Quantity,
+                unitCost: f.Unit_Cost,
+                totalCost: f.Total_Cost,
+                supplier: f.Supplier,
+                projectName: f.Project_Name,
+                type: f.Item_Type,
+                source: 'SharePoint'
+            } as PurchaseRecord;
+        });
+    } catch(e) {
+        console.error("Error fetching purchases", e);
+        return [];
+    }
+};
+
+export const getAllProjects = async (siteId: string): Promise<ProjectEstimate[]> => {
+    try {
+        const lists = await getSharePointLists(siteId);
+        const projectList = lists.find(l => l.displayName === 'Carsan_Projects');
+        if(!projectList) return [];
+
+        const items = await getListItems(siteId, projectList.id);
+        
+        return items.map(item => {
+            const f = item.fields;
+            let base = {};
+            try { base = JSON.parse(f.JSON_Data || '{}'); } catch(e) {}
+
+            return {
+                ...base, // Spread JSON first
+                id: `sp-${item.id}`,
+                name: f.Title,
+                client: f.Client,
+                status: f.Status,
+                contractValue: f.Value,
+                address: f.ADDRESS, // Ensure case matches list definition
+                estimator: f.Estimator,
+                deliveryDate: f['Delivery Date'],
+                expirationDate: f['Expiration Date'],
+                awardedDate: f['Awarded Date'],
+            } as ProjectEstimate;
+        });
+    } catch(e) {
+        console.error("Error fetching projects", e);
+        return [];
+    }
+};
+
 // Helper to download an image from a private SharePoint URL and convert to Base64 for display
 export const downloadSharePointImage = async (url: string): Promise<string | undefined> => {
     try {
@@ -147,8 +218,8 @@ export const createSharePointList = async (siteId: string, listName: string, col
     return await listRes.json();
 };
 
-export const addListItem = async (siteId: string, listId: string, fields: any): Promise<void> => {
-    const token = await getGraphToken(SCOPES);
+export const addListItem = async (siteId: string, listId: string, fields: any, forceToken = false): Promise<void> => {
+    const token = await getGraphToken(SCOPES, forceToken);
     const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items`, {
         method: 'POST',
         headers: { 
@@ -180,10 +251,7 @@ export const updateListItem = async (siteId: string, listId: string, itemId: str
 
 // Auto-Provisioning helper
 export const ensureCarsanLists = async (siteId: string, forceToken = false) => {
-    // Note: We deliberately DO NOT check if the list exists first using 'find' because pagination might hide it.
-    // Instead, we try to create it and handle the 409 (Conflict/Exists) error in createSharePointList.
-    
-    // 1. Project List
+    // 1. Project List - Added ADDRESS, Estimator, Dates
     await createSharePointList(siteId, 'Carsan_Projects', [
         { name: 'Client', text: {} },
         { name: 'Status', text: {} },

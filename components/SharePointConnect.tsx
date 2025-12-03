@@ -174,10 +174,23 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                     const address = findVal(['Address', 'Location', 'Site']) || '';
                     const estimator = findVal(['Estimator', 'Owner']) || '';
                     
-                    // Date Parsing
+                    // Date Parsing - Supports DD/MM/YYYY and standard formats
                     const parseExcelDate = (val: any) => {
                         if (!val) return null;
+                        
+                        // Excel Serial Date
                         if (typeof val === 'number') return new Date(Math.round((val - 25569)*86400*1000)).toISOString();
+                        
+                        // String Parsing
+                        if (typeof val === 'string') {
+                            // Check for DD/MM/YYYY (e.g. 25/12/2024)
+                            if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(val)) {
+                                const parts = val.split('/');
+                                // Convert to YYYY-MM-DD for constructor
+                                return new Date(`${parts[2]}-${parts[1]}-${parts[0]}`).toISOString();
+                            }
+                        }
+                        
                         const d = new Date(val);
                         return !isNaN(d.getTime()) ? d.toISOString() : null;
                     };
