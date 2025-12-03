@@ -33,7 +33,7 @@ const loadState = <T,>(key: string, fallback: T): T => {
 export const App: React.FC = () => {
     // Log Version for debugging
     useEffect(() => {
-        console.log("Carsan Estimator v1.9.1 - Force Fix");
+        console.log("Carsan Electric App v2.3 - CRM Upgrade");
     }, []);
 
     const [user, setUser] = useState<User | null>(null);
@@ -147,11 +147,11 @@ export const App: React.FC = () => {
             case ViewState.DATABASE:
                 return <PriceDatabase materials={materials} setMaterials={setMaterials} />;
             case ViewState.CRM:
-                return <CRM leads={leads} setLeads={setLeads} opportunities={opportunities} setOpportunities={setOpportunities} />;
+                return <CRM leads={leads} setLeads={setLeads} opportunities={opportunities} setOpportunities={setOpportunities} projects={projects} />;
             case ViewState.SERVICE:
                 return <ServiceModule user={user} materials={materials} projects={projects} tickets={tickets} setTickets={setTickets} />;
             case ViewState.PRICE_ANALYSIS:
-                return <PriceAnalysis purchases={purchases} setPurchases={setPurchases} materials={materials} setMaterials={setMaterials} />;
+                return <PriceAnalysis purchases={purchases} setPurchases={setPurchases} materials={materials} setMaterials={setMaterials} projects={projects} />;
             case ViewState.CLOUD_DB:
                 return <SharePointConnect projects={projects} materials={materials} tickets={tickets} />;
             default:
@@ -172,7 +172,7 @@ export const App: React.FC = () => {
             <div className="flex-1 flex flex-col h-full overflow-hidden relative md:ml-64 transition-all duration-300">
                  {/* Mobile Header for Sidebar Toggle */}
                  <div className="md:hidden bg-slate-900 text-white p-4 flex items-center justify-between shrink-0">
-                    <span className="font-bold">CARSAN</span>
+                    <span className="font-bold">CARSAN Electric App</span>
                     <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-slate-300 hover:text-white">Menu</button>
                  </div>
                  <main className="flex-1 overflow-y-auto custom-scrollbar">

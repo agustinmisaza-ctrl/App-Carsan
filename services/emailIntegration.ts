@@ -1,4 +1,3 @@
-
 import { Lead } from '../types';
 import { PublicClientApplication } from '@azure/msal-browser';
 

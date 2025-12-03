@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { ProjectEstimate, MaterialItem, ServiceTicket } from '../types';
 import { searchSharePointSites, ensureCarsanLists, getSharePointLists, addListItem, updateListItem, getListItems } from '../services/sharepointService';
