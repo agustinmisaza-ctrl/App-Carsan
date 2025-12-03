@@ -107,8 +107,8 @@ export const downloadSharePointImage = async (url: string): Promise<string | und
 
 // --- WRITE OPERATIONS (DATABASE MODE) ---
 
-export const createSharePointList = async (siteId: string, listName: string, columns: any[]): Promise<SPList> => {
-    const token = await getGraphToken(SCOPES);
+export const createSharePointList = async (siteId: string, listName: string, columns: any[], forceToken = false): Promise<SPList> => {
+    const token = await getGraphToken(SCOPES, forceToken);
     
     // 1. Create List
     const listRes = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists`, {
@@ -138,7 +138,7 @@ export const createSharePointList = async (siteId: string, listName: string, col
         
         // Handle Permissions Error (403 Forbidden)
         if (listRes.status === 403) {
-            throw new Error(`Access Denied. You are missing 'Sites.ReadWrite.All' permission in Azure.`);
+            throw new Error(`Access Denied (403). Missing 'Sites.ReadWrite.All' or user lacks Edit permissions on this specific site.`);
         }
 
         const errData = await listRes.json().catch(() => ({}));
@@ -179,7 +179,7 @@ export const updateListItem = async (siteId: string, listId: string, itemId: str
 };
 
 // Auto-Provisioning helper
-export const ensureCarsanLists = async (siteId: string) => {
+export const ensureCarsanLists = async (siteId: string, forceToken = false) => {
     // Note: We deliberately DO NOT check if the list exists first using 'find' because pagination might hide it.
     // Instead, we try to create it and handle the 409 (Conflict/Exists) error in createSharePointList.
     
@@ -189,14 +189,14 @@ export const ensureCarsanLists = async (siteId: string) => {
         { name: 'Status', text: {} },
         { name: 'Value', number: {} },
         { name: 'JSON_Data', text: {} } // Stores the full object as string
-    ]);
+    ], forceToken);
 
     // 2. Materials List
     await createSharePointList(siteId, 'Carsan_Materials', [
         { name: 'Category', text: {} },
         { name: 'Cost', number: {} },
         { name: 'JSON_Data', text: {} }
-    ]);
+    ], forceToken);
     
     return true;
 };

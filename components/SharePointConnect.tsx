@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { Cloud, Check, Loader2, Database, AlertTriangle, RefreshCw, Globe, ChevronRight, Settings, Save, Copy, LogOut, ShieldAlert } from 'lucide-react';
 import { searchSharePointSites, ensureCarsanLists, addListItem, getSharePointLists, getListItems, updateListItem, SPSite } from '../services/sharepointService';
@@ -127,7 +128,8 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         setRawError('');
         
         try {
-            await ensureCarsanLists(selectedSite.id);
+            // Pass TRUE to force a fresh token from Microsoft, ignoring cache
+            await ensureCarsanLists(selectedSite.id, true);
             setDbInitialized(true);
             setStatus('Database Created!');
         } catch (e: any) {
