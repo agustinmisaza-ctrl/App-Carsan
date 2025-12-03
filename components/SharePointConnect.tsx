@@ -1,9 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
-import { Cloud, Check, Loader2, Database, AlertTriangle, RefreshCw, Globe, ChevronRight, Settings, Save, Copy, LogOut, ShieldAlert } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Cloud, Check, Loader2, Database, AlertTriangle, RefreshCw, Globe, ChevronRight, Settings, Save, Copy, LogOut, ShieldAlert, FileSpreadsheet, Upload } from 'lucide-react';
 import { searchSharePointSites, ensureCarsanLists, addListItem, getSharePointLists, getListItems, updateListItem, SPSite } from '../services/sharepointService';
 import { ProjectEstimate, MaterialItem } from '../types';
 import { getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId, signOut, getGraphToken } from '../services/emailIntegration';
+import * as XLSX from 'xlsx';
 
 interface SharePointConnectProps {
     projects: ProjectEstimate[];
@@ -28,6 +29,8 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
     const [permissionError, setPermissionError] = useState(false);
     const [rawError, setRawError] = useState<string>('');
     const [copied, setCopied] = useState(false);
+
+    const excelInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         setTenantId(getStoredTenantId() || '');
@@ -61,7 +64,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
     const handleForceRepair = async () => {
         try {
             // Force an interactive login specifically for SharePoint scopes
-            await getGraphToken(['Sites.ReadWrite.All'], true);
+            await getGraphToken(['Sites.ReadWrite.All', 'Sites.Manage.All'], true);
             setPermissionError(false);
             setRawError('');
             alert("Permissions refreshed! Please try 'Initialize Database' again.");
@@ -146,26 +149,35 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         }
     };
 
+    // Updated Sync Logic with Batching to prevent UI Freeze
     const handleSyncUp = async () => {
         if (!selectedSite) return;
         if (!confirm("This will overwrite SharePoint data with your local data. Continue?")) return;
         
         setLoading(true);
-        setStatus('Syncing Projects...');
+        setStatus('Connecting...');
         
         try {
             const lists = await getSharePointLists(selectedSite.id);
             const projList = lists.find(l => l.displayName === 'Carsan_Projects');
             
             if (projList) {
-                for (const p of projects) {
-                    await addListItem(selectedSite.id, projList.id, {
+                const chunkSize = 5; // Batch size
+                for (let i = 0; i < projects.length; i += chunkSize) {
+                    const chunk = projects.slice(i, i + chunkSize);
+                    setStatus(`Syncing batch ${Math.min(i + chunkSize, projects.length)} of ${projects.length}...`);
+                    
+                    // Upload batch in parallel
+                    await Promise.all(chunk.map(p => addListItem(selectedSite.id, projList.id, {
                         Title: p.name,
                         Client: p.client,
                         Status: p.status,
                         Value: p.contractValue || 0,
                         JSON_Data: JSON.stringify(p)
-                    });
+                    })));
+                    
+                    // Small delay to let UI breathe
+                    await new Promise(r => setTimeout(r, 100));
                 }
             }
             setStatus('Sync Complete!');
@@ -175,6 +187,98 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         } finally {
             setLoading(false);
         }
+    };
+
+    // New Function: Upload Excel File Directly to Cloud
+    const handleExcelToCloud = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !selectedSite) return;
+
+        setLoading(true);
+        setStatus('Reading Excel File...');
+
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            try {
+                const data = event.target?.result;
+                const workbook = XLSX.read(data, { type: 'array' });
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+                if (!Array.isArray(jsonData) || jsonData.length === 0) {
+                    alert("No data found in Excel file.");
+                    setLoading(false);
+                    return;
+                }
+
+                const lists = await getSharePointLists(selectedSite.id);
+                const projList = lists.find(l => l.displayName === 'Carsan_Projects');
+
+                if (!projList) {
+                    alert("Project List not found on SharePoint. Initialize Database first.");
+                    setLoading(false);
+                    return;
+                }
+
+                // Helper to safely find values in messy excel headers
+                const findVal = (row: any, keys: string[]) => {
+                    const rowKeys = Object.keys(row);
+                    for (const key of keys) {
+                        const foundKey = rowKeys.find(k => k.toLowerCase().trim() === key.toLowerCase().trim());
+                        if (foundKey && row[foundKey] !== undefined) return row[foundKey];
+                    }
+                    return undefined;
+                };
+
+                const chunkSize = 5;
+                for (let i = 0; i < jsonData.length; i += chunkSize) {
+                    const chunk = jsonData.slice(i, i + chunkSize);
+                    setStatus(`Uploading Excel row ${Math.min(i + chunkSize, jsonData.length)} of ${jsonData.length}...`);
+
+                    await Promise.all(chunk.map(async (row: any, idx: number) => {
+                        const name = findVal(row, ['Project Name', 'Project', 'Title']) || `Imported Project ${i + idx}`;
+                        const client = findVal(row, ['Client', 'Customer']) || 'Unknown';
+                        const status = findVal(row, ['Status', 'Stage']) || 'Draft';
+                        const value = Number(findVal(row, ['Value', 'Amount', 'Total'])) || 0;
+                        const address = findVal(row, ['Address', 'Location']) || 'Miami, FL';
+                        
+                        // Construct the full project object to store in JSON_Data
+                        const fullProjectObj: ProjectEstimate = {
+                            id: `excel-imp-${Date.now()}-${i}-${idx}`,
+                            name,
+                            client,
+                            status: status as any,
+                            contractValue: value,
+                            address,
+                            dateCreated: new Date().toISOString(),
+                            laborRate: 75,
+                            items: []
+                        };
+
+                        await addListItem(selectedSite.id, projList.id, {
+                            Title: name,
+                            Client: client,
+                            Status: status,
+                            Value: value,
+                            JSON_Data: JSON.stringify(fullProjectObj)
+                        });
+                    }));
+                    await new Promise(r => setTimeout(r, 100));
+                }
+
+                setStatus(`Successfully imported ${jsonData.length} projects to Cloud!`);
+                
+            } catch (err) {
+                console.error(err);
+                setStatus("Import Failed. Check console.");
+                alert("Failed to process Excel file.");
+            } finally {
+                setLoading(false);
+                if (excelInputRef.current) excelInputRef.current.value = '';
+            }
+        };
+        reader.readAsArrayBuffer(file);
     };
 
     const handleSyncDown = async () => {
@@ -390,13 +494,30 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                                     <p className="text-xs text-slate-500 mb-4">
                                         Upload your local projects ({projects.length}) to SharePoint for the team.
                                     </p>
-                                    <button 
-                                        onClick={handleSyncUp}
-                                        disabled={loading}
-                                        className="w-full bg-slate-900 text-white py-2 rounded-lg text-sm font-bold hover:bg-slate-800 disabled:opacity-50"
-                                    >
-                                        Upload Local Data
-                                    </button>
+                                    <div className="space-y-2">
+                                        <button 
+                                            onClick={handleSyncUp}
+                                            disabled={loading}
+                                            className="w-full bg-slate-900 text-white py-2 rounded-lg text-sm font-bold hover:bg-slate-800 disabled:opacity-50"
+                                        >
+                                            Upload Local Data
+                                        </button>
+                                        <div className="relative">
+                                            <input 
+                                                type="file" 
+                                                accept=".xlsx, .xls"
+                                                ref={excelInputRef}
+                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                onChange={handleExcelToCloud}
+                                            />
+                                            <button 
+                                                disabled={loading}
+                                                className="w-full bg-emerald-600 text-white py-2 rounded-lg text-sm font-bold hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                                            >
+                                                <FileSpreadsheet className="w-4 h-4" /> Import Excel to Cloud
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <div className="border border-slate-200 rounded-xl p-5 hover:border-blue-300 transition">
