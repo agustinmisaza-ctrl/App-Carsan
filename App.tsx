@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { ViewState, MaterialItem, ProjectEstimate, User, ServiceTicket, PurchaseRecord, Lead, Opportunity } from './types';
 import { Sidebar } from './components/Sidebar';
@@ -160,6 +159,11 @@ const loadState = <T,>(key: string, fallback: T): T => {
 };
 
 export const App: React.FC = () => {
+    // Log Version for debugging
+    useEffect(() => {
+        console.log("Carsan Estimator v1.2 Loaded - Production Build");
+    }, []);
+
     const [user, setUser] = useState<User | null>(null);
     const [currentView, setCurrentView] = useState<ViewState>(ViewState.DASHBOARD);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
