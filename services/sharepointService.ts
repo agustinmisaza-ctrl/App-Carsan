@@ -14,8 +14,8 @@ export interface SPList {
 }
 
 export interface SPColumn {
-    name: string; 
-    displayName: string; 
+    name: string; // The internal technical name
+    displayName: string; // The user friendly name
 }
 
 export interface SPItem {
@@ -29,6 +29,7 @@ const SCOPES = ["Sites.ReadWrite.All", "Sites.Manage.All"];
 
 export const searchSharePointSites = async (query: string): Promise<SPSite[]> => {
     const token = await getGraphToken(SCOPES);
+    
     const endpoint = query 
         ? `https://graph.microsoft.com/v1.0/sites?search=${query}`
         : `https://graph.microsoft.com/v1.0/sites?search=*`;
@@ -57,11 +58,20 @@ export const getSharePointLists = async (siteId: string): Promise<SPList[]> => {
     return data.value.filter((l: any) => !l.system);
 };
 
-// FIX: PAGINATION IMPLEMENTED HERE
+export const getListColumns = async (siteId: string, listId: string): Promise<SPColumn[]> => {
+    const token = await getGraphToken(SCOPES);
+    const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/columns`, {
+        headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error("Failed to fetch columns");
+    const data = await res.json();
+    return data.value.map((c: any) => ({ name: c.name, displayName: c.displayName }));
+};
+
+// FIX: Pagination Implemented
 export const getListItems = async (siteId: string, listId: string): Promise<SPItem[]> => {
     const token = await getGraphToken(SCOPES);
     let items: SPItem[] = [];
-    // Request max page size (usually 999 is limit, safely use 499)
     let nextLink = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?expand=fields&$top=499`;
 
     console.log("Starting full list download...");
@@ -77,8 +87,6 @@ export const getListItems = async (siteId: string, listId: string): Promise<SPIt
         if (data.value) {
             items = items.concat(data.value);
         }
-        
-        // Check for next page
         nextLink = data['@odata.nextLink'] || null;
     }
     
@@ -154,6 +162,28 @@ export const getAllProjects = async (siteId: string): Promise<ProjectEstimate[]>
     } catch(e) {
         console.error("Error fetching projects", e);
         return [];
+    }
+};
+
+// Helper to download an image from a private SharePoint URL and convert to Base64 for display
+export const downloadSharePointImage = async (url: string): Promise<string | undefined> => {
+    try {
+        const token = await getGraphToken(SCOPES);
+        const res = await fetch(url, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        if (!res.ok) return undefined;
+        
+        const blob = await res.blob();
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(blob);
+        });
+    } catch (e) {
+        console.error("Failed to download image", e);
+        return undefined;
     }
 };
 
