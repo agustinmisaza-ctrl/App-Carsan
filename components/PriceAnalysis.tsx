@@ -5,7 +5,7 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, L
 import { Search, TrendingUp, TrendingDown, DollarSign, Calendar, ShoppingCart, Filter, ArrowUp, ArrowDown, Award, FileText, Plus, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, Save, ArrowUpDown, RefreshCw, Download, ArrowRight, Bell, Check, AlertTriangle, PieChart, Sparkles, Percent, ListFilter, Flame } from 'lucide-react';
 import { extractInvoiceData } from '../services/geminiService';
 import * as XLSX from 'xlsx';
-import { parseCurrency } from '../utils/purchaseData';
+import { parseCurrency, normalizeSupplier } from '../utils/purchaseData';
 import { connectToQuickBooks, fetchQuickBooksBills } from '../services/quickbooksService';
 
 interface PriceAnalysisProps {
@@ -61,8 +61,8 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
   const uniqueProjects = Array.from(new Set(purchases.map(p => p.projectName))).sort();
   const uniqueTypes = Array.from(new Set(purchases.map(p => p.type))).sort();
   
-  // Lists for Auto-Complete Suggestions
-  const uniqueSuppliers = Array.from(new Set(purchases.map(p => p.supplier))).filter((s): s is string => !!s).sort();
+  // Lists for Auto-Complete Suggestions (Normalized)
+  const uniqueSuppliers = Array.from(new Set(purchases.map(p => normalizeSupplier(p.supplier)))).filter((s): s is string => !!s).sort();
   const uniqueItemNames = Array.from(new Set(purchases.map(p => p.itemDescription))).filter((i): i is string => !!i).sort();
   
   // --- PARETO ANALYSIS LOGIC ---
@@ -175,21 +175,22 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
           itemStats[k].avg = itemStats[k].totalCost / itemStats[k].count;
       });
 
-      // 2. Score Suppliers
+      // 2. Score Suppliers (Normalized)
       const supplierStats: Record<string, { totalVariancePct: number, itemsCount: number }> = {};
 
       purchases.forEach(p => {
           const key = p.itemDescription.trim().toLowerCase();
           const marketAvg = itemStats[key].avg;
+          const normalizedSupplier = normalizeSupplier(p.supplier); // Use Helper
           
           if (marketAvg > 0 && p.unitCost > 0) {
               // Calculate variance % (e.g. Paid $90 vs Avg $100 = -10% variance)
               const variance = ((p.unitCost - marketAvg) / marketAvg) * 100;
               
-              if (!supplierStats[p.supplier]) supplierStats[p.supplier] = { totalVariancePct: 0, itemsCount: 0 };
+              if (!supplierStats[normalizedSupplier]) supplierStats[normalizedSupplier] = { totalVariancePct: 0, itemsCount: 0 };
               
-              supplierStats[p.supplier].totalVariancePct += variance;
-              supplierStats[p.supplier].itemsCount += 1;
+              supplierStats[normalizedSupplier].totalVariancePct += variance;
+              supplierStats[normalizedSupplier].itemsCount += 1;
           }
       });
 
@@ -343,20 +344,26 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
               const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
               if (Array.isArray(jsonData) && setPurchases) {
-                  const newRecords: PurchaseRecord[] = jsonData.map((row: any, idx) => ({
-                      id: `bulk-${Date.now()}-${idx}`,
-                      date: row['Date'] ? new Date(row['Date']).toISOString() : new Date().toISOString(),
-                      poNumber: String(row['Purchase Order #'] || row['PO'] || ''),
-                      brand: String(row['Brand'] || ''),
-                      itemDescription: String(row['Item'] || row['Description'] || ''),
-                      quantity: Number(row['Quantity'] || 0),
-                      unitCost: parseCurrency(String(row['Unit Cost'] || row['Cost'] || 0)),
-                      totalCost: parseCurrency(String(row['Total'] || 0)),
-                      supplier: String(row['Supplier'] || ''),
-                      projectName: String(row['Project'] || ''),
-                      type: String(row['TYPE'] || 'Material'),
-                      source: 'Bulk Import'
-                  })).filter(r => r.itemDescription); // Filter empty rows
+                  const newRecords: PurchaseRecord[] = jsonData.map((row: any, idx) => {
+                      let supplier = String(row['Supplier'] || '');
+                      // Normalize Supplier
+                      supplier = normalizeSupplier(supplier);
+
+                      return {
+                        id: `bulk-${Date.now()}-${idx}`,
+                        date: row['Date'] ? new Date(row['Date']).toISOString() : new Date().toISOString(),
+                        poNumber: String(row['Purchase Order #'] || row['PO'] || ''),
+                        brand: String(row['Brand'] || ''),
+                        itemDescription: String(row['Item'] || row['Description'] || ''),
+                        quantity: Number(row['Quantity'] || 0),
+                        unitCost: parseCurrency(String(row['Unit Cost'] || row['Cost'] || 0)),
+                        totalCost: parseCurrency(String(row['Total'] || 0)),
+                        supplier: supplier,
+                        projectName: String(row['Project'] || ''),
+                        type: String(row['TYPE'] || 'Material'),
+                        source: 'Bulk Import'
+                      }
+                  }).filter(r => r.itemDescription); // Filter empty rows
 
                   setPurchases([...purchases, ...newRecords]);
                   showNotification('success', `Successfully imported ${newRecords.length} records.`);
@@ -547,7 +554,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                   </div>
                   <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                       <p className="text-xs font-bold text-slate-400 uppercase">Suppliers</p>
-                      <p className="text-2xl font-bold text-slate-900 mt-1">{new Set(filteredPurchases.map(p => p.supplier)).size}</p>
+                      <p className="text-2xl font-bold text-slate-900 mt-1">{new Set(filteredPurchases.map(p => normalizeSupplier(p.supplier))).size}</p>
                   </div>
                   <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                       <p className="text-xs font-bold text-slate-400 uppercase">Avg Unit Cost</p>
@@ -670,7 +677,8 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                                       <ResponsiveContainer width="100%" height="100%">
                                           <BarChart 
                                               data={uniqueSuppliers.map(s => {
-                                                  const supplyP = purchases.filter(p => p.itemDescription === selectedItem && p.supplier === s);
+                                                  // Group by NORMALIZED Supplier Name
+                                                  const supplyP = purchases.filter(p => p.itemDescription === selectedItem && normalizeSupplier(p.supplier) === s);
                                                   if (!supplyP.length) return null;
                                                   const avg = supplyP.reduce((sum, p) => sum + p.unitCost, 0) / supplyP.length;
                                                   return { name: s, avgPrice: avg };
@@ -970,4 +978,3 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
     </div>
   );
 };
-    

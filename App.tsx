@@ -2,15 +2,15 @@
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Login } from './components/Login';
+import { ProjectList } from './components/ProjectList';
 import { Estimator } from './components/Estimator';
 import { PriceDatabase } from './components/PriceDatabase';
-import { ProjectList } from './components/ProjectList';
 import { CRM } from './components/CRM';
 import { ServiceModule } from './components/ServiceModule';
 import { PriceAnalysis } from './components/PriceAnalysis';
 import { AIAssistant } from './components/AIAssistant';
 import { SharePointConnect } from './components/SharePointConnect';
-import { ViewState, User, ProjectEstimate, MaterialItem, ServiceTicket, PurchaseRecord } from './types';
+import { ViewState, User, ProjectEstimate, MaterialItem, ServiceTicket, Lead, PurchaseRecord } from './types';
 import { getAllPurchaseRecords } from './services/sharepointService';
 
 // Configuration constant
@@ -34,25 +34,19 @@ const loadState = <T,>(key: string, fallback: T): T => {
 export const App: React.FC = () => {
     // Log Version for debugging
     useEffect(() => {
-        console.log("Carsan Electric App v3.2 - Tax Fix");
-        
-        // Auto-load data if connected (Mock implementation of auto-load)
-        const loadCloudData = async () => {
-            // Check local storage for site ID if you saved it, otherwise this needs context
-            // For now, we rely on the manual Sync in SharePointConnect tab unless we persist siteId
-        };
+        console.log("Carsan Electric App v4.1 - Fix Currency Parsing");
     }, []);
 
     const [user, setUser] = useState<User | null>(null);
     const [currentView, setCurrentView] = useState<ViewState>(ViewState.DASHBOARD);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-    // Application Data State
+    // Global State
     const [projects, setProjects] = useState<ProjectEstimate[]>(() => loadState('carsan_projects', []));
     const [materials, setMaterials] = useState<MaterialItem[]>(() => loadState('carsan_materials', []));
     const [tickets, setTickets] = useState<ServiceTicket[]>(() => loadState('carsan_tickets', []));
     const [purchases, setPurchases] = useState<PurchaseRecord[]>(() => loadState('carsan_purchases', []));
-    const [leads, setLeads] = useState<any[]>(() => loadState('carsan_leads', []));
+    const [leads, setLeads] = useState<Lead[]>(() => loadState('carsan_leads', []));
     const [opportunities, setOpportunities] = useState<any[]>(() => loadState('carsan_opportunities', []));
 
     // Persist Data
@@ -63,14 +57,33 @@ export const App: React.FC = () => {
     useEffect(() => localStorage.setItem('carsan_leads', JSON.stringify(leads)), [leads]);
     useEffect(() => localStorage.setItem('carsan_opportunities', JSON.stringify(opportunities)), [opportunities]);
 
-    const handleLogin = (loggedInUser: User) => {
-        setUser(loggedInUser);
+    // Load Purchase History from SharePoint on Mount
+    useEffect(() => {
+        const fetchCloudData = async () => {
+            try {
+                // In a real app, we would persist the site ID. 
+                // For now, this relies on the user connecting in the Cloud DB tab, 
+                // but we can check if purchases are empty and alert the user.
+                if (purchases.length === 0) {
+                    console.log("No local purchase history. Connect to Cloud DB to fetch.");
+                }
+            } catch (e) {
+                console.error("Failed to auto-load cloud data", e);
+            }
+        };
+        fetchCloudData();
+    }, []);
+
+    const handleLogin = (u: User) => {
+        setUser(u);
+        localStorage.setItem('carsan_user', JSON.stringify(u));
     };
 
     const handleLogout = () => {
         // Clear Microsoft session tokens
         import('./services/emailIntegration').then(m => m.signOut());
         setUser(null);
+        localStorage.removeItem('carsan_user');
         setCurrentView(ViewState.DASHBOARD);
         window.location.reload();
     };
@@ -113,7 +126,7 @@ export const App: React.FC = () => {
                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                                 <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Purchase Spend</h3>
                                 <p className="text-2xl font-bold text-slate-700">
-                                    ${purchases.reduce((sum, p) => sum + p.totalCost, 0).toLocaleString()}
+                                    ${purchases.reduce((sum, p) => sum + (p.totalCost || 0), 0).toLocaleString()}
                                 </p>
                             </div>
                         </div>
@@ -192,15 +205,16 @@ export const App: React.FC = () => {
                     </div>
                 );
             case ViewState.PROJECTS:
-                return <ProjectList 
-                    projects={projects} 
-                    setProjects={setProjects} 
-                    onOpenProject={(p) => {
-                        console.log("Opening project", p.name);
-                        // In a real implementation, this would switch to Estimator view with this project loaded
-                    }} 
-                    tickets={tickets} 
-                />;
+                return (
+                  <ProjectList 
+                      projects={projects} 
+                      setProjects={setProjects} 
+                      tickets={tickets} 
+                      onOpenProject={(p) => {
+                          // In full app, this might route to a specific ID
+                      }} 
+                  />
+                );
             case ViewState.ESTIMATE_NEW:
                 return <Estimator materials={materials} projects={projects} />;
             case ViewState.DATABASE:
@@ -214,31 +228,34 @@ export const App: React.FC = () => {
             case ViewState.CLOUD_DB:
                 return <SharePointConnect projects={projects} materials={materials} tickets={tickets} />;
             default:
-                return <div className="p-8">View not found</div>;
+                return <div>View Not Found</div>;
         }
     };
 
     return (
-        <div className="flex h-screen bg-slate-100 overflow-hidden">
+        <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
             <Sidebar 
                 currentView={currentView} 
-                onChangeView={(view) => { setCurrentView(view); setIsSidebarOpen(false); }} 
-                isOpen={isSidebarOpen}
-                onClose={() => setIsSidebarOpen(false)}
-                user={user}
-                onLogout={handleLogout}
+                onChangeView={setCurrentView} 
+                isOpen={isSidebarOpen} 
+                onClose={() => setIsSidebarOpen(false)} 
+                user={user} 
+                onLogout={handleLogout} 
             />
-            <div className="flex-1 flex flex-col h-full overflow-hidden relative md:ml-64 transition-all duration-300">
-                 {/* Mobile Header for Sidebar Toggle */}
-                 <div className="md:hidden bg-slate-900 text-white p-4 flex items-center justify-between shrink-0">
-                    <span className="font-bold">CARSAN Electric App</span>
-                    <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-slate-300 hover:text-white">Menu</button>
-                 </div>
-                 <main className="flex-1 overflow-y-auto custom-scrollbar">
+            
+            <main className="flex-1 flex flex-col relative overflow-hidden md:ml-64 transition-all duration-300">
+                {/* Mobile Header Trigger */}
+                <div className="md:hidden bg-slate-900 text-white p-4 flex justify-between items-center shrink-0">
+                    <span className="font-bold">CARSAN Electric</span>
+                    <button onClick={() => setIsSidebarOpen(true)}>Menu</button>
+                </div>
+
+                <div className="flex-1 overflow-auto">
                     {renderView()}
-                 </main>
-                 <AIAssistant projects={projects} materials={materials} tickets={tickets} />
-            </div>
+                </div>
+
+                <AIAssistant projects={projects} materials={materials} tickets={tickets} />
+            </main>
         </div>
     );
 };
