@@ -196,7 +196,7 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
                             <p className="text-2xl font-bold text-emerald-600 mt-1">${approvedAmount.toLocaleString()}</p>
                         </div>
                         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                            <p className="text-xs font-bold text-slate-400 uppercase">Stale Tickets (>8 Days)</p>
+                            <p className="text-xs font-bold text-slate-400 uppercase">Stale Tickets (More: 8 Days)</p>
                             <p className="text-2xl font-bold text-orange-600 mt-1">{staleTickets.length}</p>
                         </div>
                     </div>
