@@ -1,4 +1,5 @@
 
+// v5.2 Update - Added getAllPurchaseRecords and new Columns
 import { getGraphToken } from "./emailIntegration";
 import { PurchaseRecord, ProjectEstimate } from "../types";
 
@@ -108,11 +109,11 @@ export const getAllPurchaseRecords = async (siteId: string): Promise<PurchaseRec
                 itemDescription: f.Item_Description,
                 quantity: f.Quantity,
                 unitCost: f.Unit_Cost,
-                tax: f.Tax,
                 totalCost: f.Total_Cost,
                 supplier: f.Supplier,
                 projectName: f.Project_Name,
                 type: f.Item_Type,
+                tax: f.Tax,
                 source: 'SharePoint'
             } as PurchaseRecord;
         });
@@ -253,6 +254,7 @@ export const updateListItem = async (siteId: string, listId: string, itemId: str
 
 // Auto-Provisioning helper
 export const ensureCarsanLists = async (siteId: string, forceToken = false) => {
+    
     // 1. Project List - Added ADDRESS, Estimator, Dates
     await createSharePointList(siteId, 'Carsan_Projects', [
         { name: 'Client', text: {} },
@@ -274,7 +276,6 @@ export const ensureCarsanLists = async (siteId: string, forceToken = false) => {
     ], forceToken);
 
     // 3. Purchase History List (For Price Analysis)
-    // ADDED TAX COLUMN
     await createSharePointList(siteId, 'Carsan_Purchases', [
         { name: 'PurchaseDate', dateTime: {} },
         { name: 'PO_Number', text: {} },
