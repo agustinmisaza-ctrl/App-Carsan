@@ -32,7 +32,7 @@ const loadState = <T,>(key: string, fallback: T): T => {
 
 export const App: React.FC = () => {
     useEffect(() => {
-        console.log("Carsan Electric App v6.1 - Manual Build Fix");
+        console.log("Carsan Electric App v7.0 - Sync Down Fix");
     }, []);
 
     const [user, setUser] = useState<User | null>(null);
@@ -230,7 +230,8 @@ export const App: React.FC = () => {
             case ViewState.CRM: return <CRM leads={leads} setLeads={setLeads} opportunities={opportunities} setOpportunities={setOpportunities} projects={projects} />;
             case ViewState.SERVICE: return <ServiceModule user={user} materials={materials} projects={projects} tickets={tickets} setTickets={setTickets} />;
             case ViewState.PRICE_ANALYSIS: return <PriceAnalysis purchases={purchases} setPurchases={setPurchases} materials={materials} setMaterials={setMaterials} projects={projects} />;
-            case ViewState.CLOUD_DB: return <SharePointConnect projects={projects} materials={materials} tickets={tickets} />;
+            case ViewState.CLOUD_DB: 
+                return <SharePointConnect projects={projects} setProjects={setProjects} materials={materials} tickets={tickets} />;
             default: return <div>View Not Found</div>;
         }
     };
