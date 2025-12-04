@@ -1,47 +1,21 @@
 import { getGraphToken } from "./emailIntegration";
 import { PurchaseRecord, ProjectEstimate } from "../types";
 
-// Types for Internal SharePoint Data
-export interface SPSite {
-    id: string;
-    displayName: string;
-    webUrl: string;
-}
-
-export interface SPList {
-    id: string;
-    displayName: string;
-}
-
-export interface SPColumn {
-    name: string; // The internal technical name
-    displayName: string; // The user friendly name
-}
-
-export interface SPItem {
-    id: string;
-    fields: any;
-}
+export interface SPSite { id: string; displayName: string; webUrl: string; }
+export interface SPList { id: string; displayName: string; }
+export interface SPColumn { name: string; displayName: string; }
+export interface SPItem { id: string; fields: any; }
 
 const SCOPES = ["Sites.ReadWrite.All", "Sites.Manage.All"];
 
 // --- READ OPERATIONS ---
-
 export const searchSharePointSites = async (query: string): Promise<SPSite[]> => {
     const token = await getGraphToken(SCOPES);
-    
-    const endpoint = query 
-        ? `https://graph.microsoft.com/v1.0/sites?search=${query}`
-        : `https://graph.microsoft.com/v1.0/sites?search=*`;
-
-    const res = await fetch(endpoint, {
-        headers: { Authorization: `Bearer ${token}` }
-    });
+    const endpoint = query ? `https://graph.microsoft.com/v1.0/sites?search=${query}` : `https://graph.microsoft.com/v1.0/sites?search=*`;
+    const res = await fetch(endpoint, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) {
         const err = await res.json();
-        if (err.error?.code === "InvalidAuthenticationToken" || res.status === 401) {
-             throw new Error("AADSTS50194: Authentication failed. Check Tenant ID.");
-        }
+        if (err.error?.code === "InvalidAuthenticationToken" || res.status === 401) throw new Error("AADSTS50194: Authentication failed. Check Tenant ID.");
         throw new Error("Failed to fetch sites");
     }
     const data = await res.json();
@@ -50,9 +24,7 @@ export const searchSharePointSites = async (query: string): Promise<SPSite[]> =>
 
 export const getSharePointLists = async (siteId: string): Promise<SPList[]> => {
     const token = await getGraphToken(SCOPES);
-    const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists`, {
-        headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists`, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) throw new Error("Failed to fetch lists");
     const data = await res.json();
     return data.value.filter((l: any) => !l.system);
@@ -60,41 +32,36 @@ export const getSharePointLists = async (siteId: string): Promise<SPList[]> => {
 
 export const getListColumns = async (siteId: string, listId: string): Promise<SPColumn[]> => {
     const token = await getGraphToken(SCOPES);
-    const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/columns`, {
-        headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/columns`, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) throw new Error("Failed to fetch columns");
     const data = await res.json();
     return data.value.map((c: any) => ({ name: c.name, displayName: c.displayName }));
 };
 
+// FIX: Pagination logic to get ALL items > 200
 export const getListItems = async (siteId: string, listId: string): Promise<SPItem[]> => {
     const token = await getGraphToken(SCOPES);
     let items: SPItem[] = [];
+    // Start with top 499 (safe limit)
     let nextLink = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?expand=fields&$top=499`;
 
     console.log("Starting full list download...");
 
     while (nextLink) {
-        const res = await fetch(nextLink, {
-            headers: { Authorization: `Bearer ${token}` }
-        });
-        
+        const res = await fetch(nextLink, { headers: { Authorization: `Bearer ${token}` } });
         if (!res.ok) throw new Error("Failed to fetch items page");
         
         const data = await res.json();
-        if (data.value) {
-            items = items.concat(data.value);
-        }
+        if (data.value) items = items.concat(data.value);
+        
+        // Loop until nextLink is null
         nextLink = data['@odata.nextLink'] || null;
     }
-    
     console.log(`Downloaded ${items.length} total items.`);
     return items;
 };
 
 // --- DATA FETCHING HELPERS ---
-
 export const getAllPurchaseRecords = async (siteId: string): Promise<PurchaseRecord[]> => {
     try {
         const lists = await getSharePointLists(siteId);
@@ -164,44 +131,27 @@ export const getAllProjects = async (siteId: string): Promise<ProjectEstimate[]>
     }
 };
 
-// Helper to download an image from a private SharePoint URL and convert to Base64 for display
 export const downloadSharePointImage = async (url: string): Promise<string | undefined> => {
     try {
         const token = await getGraphToken(SCOPES);
-        const res = await fetch(url, {
-            headers: { Authorization: `Bearer ${token}` }
-        });
-        
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
         if (!res.ok) return undefined;
-        
         const blob = await res.blob();
         return new Promise((resolve) => {
             const reader = new FileReader();
             reader.onloadend = () => resolve(reader.result as string);
             reader.readAsDataURL(blob);
         });
-    } catch (e) {
-        console.error("Failed to download image", e);
-        return undefined;
-    }
+    } catch (e) { return undefined; }
 };
 
 // --- WRITE OPERATIONS ---
-
 export const createSharePointList = async (siteId: string, listName: string, columns: any[], forceToken = false): Promise<SPList> => {
     const token = await getGraphToken(SCOPES, forceToken);
-    
     const listRes = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists`, {
         method: 'POST',
-        headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            displayName: listName,
-            columns: columns,
-            list: { template: "genericList" }
-        })
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: listName, columns: columns, list: { template: "genericList" } })
     });
 
     if (!listRes.ok) {
@@ -210,9 +160,7 @@ export const createSharePointList = async (siteId: string, listName: string, col
             const existing = allLists.find(l => l.displayName === listName);
             if (existing) return existing;
         }
-        if (listRes.status === 403) {
-            throw new Error(`Access Denied (403). Missing 'Sites.ReadWrite.All' or user lacks Edit permissions.`);
-        }
+        if (listRes.status === 403) throw new Error(`Access Denied (403). Missing 'Sites.ReadWrite.All'.`);
         const errData = await listRes.json().catch(() => ({}));
         throw new Error(`Failed to create list ${listName}: ${errData.error?.message || listRes.statusText}`);
     }
@@ -223,10 +171,7 @@ export const addListItem = async (siteId: string, listId: string, fields: any, f
     const token = await getGraphToken(SCOPES, forceToken);
     const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items`, {
         method: 'POST',
-        headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-        },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields })
     });
     if (!res.ok) {
@@ -239,10 +184,7 @@ export const updateListItem = async (siteId: string, listId: string, itemId: str
     const token = await getGraphToken(SCOPES);
     const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, {
         method: 'PATCH',
-        headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-        },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(fields)
     });
     if (!res.ok) throw new Error("Failed to update item");
@@ -262,9 +204,7 @@ export const ensureCarsanLists = async (siteId: string, forceToken = false) => {
     ], forceToken);
 
     await createSharePointList(siteId, 'Carsan_Materials', [
-        { name: 'Category', text: {} },
-        { name: 'Cost', number: {} },
-        { name: 'JSON_Data', text: {} }
+        { name: 'Category', text: {} }, { name: 'Cost', number: {} }, { name: 'JSON_Data', text: {} }
     ], forceToken);
 
     await createSharePointList(siteId, 'Carsan_Purchases', [
@@ -281,6 +221,5 @@ export const ensureCarsanLists = async (siteId: string, forceToken = false) => {
         { name: 'Item_Type', text: {} },
         { name: 'JSON_Data', text: {} }
     ], forceToken);
-    
     return true;
 };

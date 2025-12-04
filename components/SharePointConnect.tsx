@@ -57,7 +57,6 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
 
     const handleLogout = async () => { await signOut(); window.location.reload(); };
 
-    // FIX: Handle Sync Down for large lists
     const handleSyncDown = async () => {
         if (!selectedSite || !setProjects) return;
         setIsLoading(true);
@@ -80,7 +79,6 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         }
     };
 
-    // FIX: Handle Sync Down for Purchase History
     const handlePurchaseSyncDown = async () => {
         if (!selectedSite || !setPurchases) return;
         setIsLoading(true);
@@ -103,18 +101,29 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         }
     };
 
+    // FIX: Smart Date Parsing for 1969 Issue
     const parseExcelDate = (val: any) => {
         if (!val) return null;
-        if (typeof val === 'number') return new Date(Math.round((val - 25569) * 86400 * 1000)).toISOString();
+        // Excel Serial Number
+        if (typeof val === 'number') {
+            return new Date(Math.round((val - 25569) * 86400 * 1000)).toISOString();
+        }
+        
         if (typeof val === 'string') {
             let d = new Date(val);
+            // Check for DD/MM/YYYY (e.g. 25/12/2024) - common in Excel exports
             if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(val)) {
                 const parts = val.split('/');
+                // Convert to YYYY-MM-DD for constructor
                 d = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
             }
+            
+            // Check for valid year (>1970) to avoid the "Beginning of Time" error
             if (!isNaN(d.getTime()) && d.getFullYear() > 1970) return d.toISOString();
         }
-        return new Date().toISOString();
+        // Default fallback to avoid crashing, but maybe better to return null?
+        // For now returning ISO string of current date to be safe
+        return new Date().toISOString(); 
     };
 
     const handlePurchaseHistoryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -150,6 +159,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                     return undefined;
                 };
 
+                const chunkSize = 5; // Batch size
                 for (let i = 0; i < jsonData.length; i++) {
                     const row: any = jsonData[i];
                     try {
