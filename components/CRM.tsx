@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Lead, ProjectEstimate } from '../types';
 import { fetchOutlookEmails, getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId } from '../services/emailIntegration';
@@ -9,7 +8,7 @@ interface CRMProps {
     setLeads: (leads: Lead[]) => void;
     opportunities: any[];
     setOpportunities: (opps: any[]) => void;
-    projects?: ProjectEstimate[]; // Optional for financial calcs
+    projects?: ProjectEstimate[]; 
 }
 
 export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpportunities, projects = [] }) => {
@@ -21,12 +20,11 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
     const [tenantId, setTenantId] = useState(getStoredTenantId() || '');
     const [clientId, setClientId] = useState(getStoredClientId() || '');
 
-    // Financial KPIs (Mocked or calculated from projects)
+    // Financial KPIs
     const currentYear = new Date().getFullYear();
     const lastYear = currentYear - 1;
 
     const getProjectValue = (year: number, status: string) => {
-        // Filter projects if available, otherwise return 0
         if (!projects) return 0;
         return projects
             .filter(p => new Date(p.dateCreated).getFullYear() === year)
@@ -37,11 +35,9 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
     const sentThisYear = getProjectValue(currentYear, 'Sent');
     const wonThisYear = getProjectValue(currentYear, 'Won');
     const lostThisYear = getProjectValue(currentYear, 'Lost');
-    
     const sentLastYear = getProjectValue(lastYear, 'Sent');
     const wonLastYear = getProjectValue(lastYear, 'Won');
 
-    // Growth calculation
     const calcGrowth = (current: number, past: number) => {
         if (past === 0) return 100;
         return ((current - past) / past) * 100;
@@ -51,7 +47,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
         setIsLoading(true);
         try {
             const data = await fetchOutlookEmails();
-            // Merge new leads avoiding duplicates by ID
             const newLeads = [...leads];
             data.forEach(d => {
                 if (!newLeads.find(l => l.id === d.id)) {
@@ -85,7 +80,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
             date: new Date().toISOString()
         };
         setOpportunities([...opportunities, newOpp]);
-        // Optional: Remove from leads or mark converted?
         setLeads(leads.filter(l => l.id !== lead.id));
         setActiveTab('pipeline');
     };
@@ -161,11 +155,8 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                         <Settings className="w-4 h-4" /> Azure Integration Settings
                     </h3>
                     <div className="bg-blue-50 p-4 rounded-lg mb-6 text-sm text-blue-800">
-                        <p className="font-bold mb-1">Vercel Deployment Detected</p>
-                        <p>Your redirect URI changes with every deployment preview. <br/>
-                        <strong>Current Redirect URI:</strong> <code className="bg-white px-1 py-0.5 rounded border">{window.location.origin}</code>
-                        </p>
-                        <p className="mt-2 text-xs">If you see error <strong>AADSTS50011</strong>, copy the URI above and add it to your Azure App Registration.</p>
+                        <p className="font-bold mb-1">Vercel Deployment</p>
+                        <p>Redirect URI: <code className="bg-white px-1 py-0.5 rounded border">{window.location.origin}</code></p>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
@@ -176,7 +167,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                 placeholder="e.g. 555y1dg..."
                                 className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
                             />
-                            <p className="text-[10px] text-slate-400 mt-1">Found in Overview &gt; Directory (tenant) ID. Required for Single-Tenant apps.</p>
+                            <p className="text-[10px] text-slate-400 mt-1">Found in Overview &gt; Directory (tenant) ID.</p>
                         </div>
                         <div>
                             <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Client ID</label>
@@ -361,13 +352,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                         </td>
                                     </tr>
                                 ))}
-                                {leads.length === 0 && (
-                                    <tr>
-                                        <td colSpan={5} className="p-12 text-center text-slate-400 italic">
-                                            No leads found. Sync Outlook to find new contacts.
-                                        </td>
-                                    </tr>
-                                )}
                             </tbody>
                         </table>
                     </div>

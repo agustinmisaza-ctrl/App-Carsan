@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Login } from './components/Login';
@@ -33,7 +32,7 @@ const loadState = <T,>(key: string, fallback: T): T => {
 
 export const App: React.FC = () => {
     useEffect(() => {
-        console.log("Carsan Electric App v8.0 - Recovery");
+        console.log("Carsan Electric App v7.3 - Upload Debugging");
     }, []);
 
     const [user, setUser] = useState<User | null>(null);
@@ -231,9 +230,7 @@ export const App: React.FC = () => {
             case ViewState.CRM: return <CRM leads={leads} setLeads={setLeads} opportunities={opportunities} setOpportunities={setOpportunities} projects={projects} />;
             case ViewState.SERVICE: return <ServiceModule user={user} materials={materials} projects={projects} tickets={tickets} setTickets={setTickets} />;
             case ViewState.PRICE_ANALYSIS: return <PriceAnalysis purchases={purchases} setPurchases={setPurchases} materials={materials} setMaterials={setMaterials} projects={projects} />;
-            case ViewState.CLOUD_DB: 
-                // FIXED: Passing setProjects and setPurchases to allow Sync Down
-                return <SharePointConnect projects={projects} setProjects={setProjects} materials={materials} tickets={tickets} purchases={purchases} setPurchases={setPurchases} />;
+            case ViewState.CLOUD_DB: return <SharePointConnect projects={projects} setProjects={setProjects} materials={materials} tickets={tickets} purchases={purchases} setPurchases={setPurchases} />;
             default: return <div>View Not Found</div>;
         }
     };

@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#2563eb" />
     <meta name="color-scheme" content="light">
-    <!-- Vercel Build Fix v5.2 -->
     <title>Carsan Electric App</title>
     <link rel="manifest" href="/manifest.json">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -15,49 +14,15 @@
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <style>
-      /* FORCE LIGHT MODE */
-      :root {
-        color-scheme: light;
-      }
-      html, body {
-        background-color: #f8fafc; /* slate-50 */
-        color: #0f172a; /* slate-900 */
-      }
-      
-      body {
-        font-family: 'Inter', sans-serif;
-      }
-
-      /* FORCE INPUTS TO BE WHITE WITH DARK TEXT */
-      input, select, textarea {
-        background-color: #ffffff !important;
-        color: #0f172a !important;
-        -webkit-appearance: none; /* Removes iOS shadow/gradient styling */
-        appearance: none;
-      }
-
-      /* Custom scrollbar for table containers */
-      .custom-scrollbar::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
-      .custom-scrollbar::-webkit-scrollbar-track {
-        background: #f1f5f9;
-      }
-      .custom-scrollbar::-webkit-scrollbar-thumb {
-        background: #cbd5e1;
-        border-radius: 4px;
-      }
-      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-        background: #94a3b8;
-      }
-      /* Map container z-index fix */
-      .leaflet-pane {
-        z-index: 10 !important;
-      }
-      .leaflet-top, .leaflet-bottom {
-        z-index: 20 !important;
-      }
+      :root { color-scheme: light; }
+      html, body { background-color: #f8fafc; color: #0f172a; font-family: 'Inter', sans-serif; }
+      input, select, textarea { background-color: #ffffff !important; color: #0f172a !important; -webkit-appearance: none; appearance: none; }
+      .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+      .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+      .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+      .leaflet-pane { z-index: 10 !important; }
+      .leaflet-top, .leaflet-bottom { z-index: 20 !important; }
     </style>
 <script type="importmap">
 {
@@ -84,13 +49,7 @@
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then(registration => {
-              console.log('ServiceWorker registration successful with scope: ', registration.scope);
-            })
-            .catch(err => {
-              console.log('ServiceWorker registration failed: ', err);
-            });
+          navigator.serviceWorker.register('/sw.js').catch(err => console.log('ServiceWorker registration failed: ', err));
         });
       }
     </script>

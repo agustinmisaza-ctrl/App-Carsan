@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { Search, Upload, Loader2, Database, AlertTriangle, RefreshCw, LogOut, FileSpreadsheet, DollarSign } from 'lucide-react';
+import { Search, Upload, Loader2, Database, AlertTriangle, RefreshCw, LogOut, FileSpreadsheet, DollarSign, XCircle } from 'lucide-react';
 import { searchSharePointSites, getSharePointLists, addListItem, SPSite, ensureCarsanLists, getAllProjects, getAllPurchaseRecords } from '../services/sharepointService';
 import { normalizeSupplier, parseCurrency } from '../utils/purchaseData';
 import { signOut } from '../services/emailIntegration';
@@ -14,6 +14,11 @@ interface SharePointConnectProps {
     setPurchases?: (purchases: any[]) => void;
 }
 
+interface RowError {
+    row: number;
+    message: string;
+}
+
 export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, setProjects, materials, tickets, purchases, setPurchases }) => {
     const [step, setStep] = useState<number>(0);
     const [sites, setSites] = useState<SPSite[]>([]);
@@ -21,6 +26,9 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [statusMsg, setStatusMsg] = useState<string>("");
+    
+    // New State for Detailed Row Errors
+    const [rowErrors, setRowErrors] = useState<RowError[]>([]);
 
     const handleSearchSites = async () => {
         setIsLoading(true);
@@ -99,7 +107,9 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         const file = e.target.files?.[0];
         if (!file || !selectedSite) return;
         setIsLoading(true);
+        setRowErrors([]); // Clear previous errors
         setStatusMsg("Reading Excel...");
+        
         try {
             const lists = await getSharePointLists(selectedSite.id);
             const purchaseList = lists.find(l => l.displayName === 'Carsan_Purchases');
@@ -113,6 +123,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                 const jsonData = XLSX.utils.sheet_to_json(worksheet);
                 setStatusMsg(`Uploading ${jsonData.length} records...`);
                 let successCount = 0;
+                let failCount = 0;
 
                 const findVal = (row: any, keys: string[]) => {
                     const rowKeys = Object.keys(row);
@@ -135,7 +146,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                         await addListItem(selectedSite.id, purchaseList.id, {
                             Title: `PO-${findVal(row, ['Purchase Order #', 'PO Number', 'PO']) || i}`,
                             PurchaseDate: parseExcelDate(findVal(row, ['Date', 'Invoice Date'])),
-                            PO_Number: String(findVal(row, ['Purchase Order #', 'PO']) || ''),
+                            PO_Number: String(findVal(row, ['Purchase Order #', 'PO Number', 'PO']) || ''),
                             Brand: String(findVal(row, ['Brand']) || ''),
                             Item_Description: String(findVal(row, ['Item', 'Item Description']) || ''),
                             Quantity: quantity,
@@ -148,15 +159,24 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                             JSON_Data: JSON.stringify(row)
                         });
                         successCount++;
-                    } catch (err) { console.error("Row upload failed", err); }
+                    } catch (err: any) { 
+                        console.error("Row upload failed", err);
+                        failCount++;
+                        setRowErrors(prev => [...prev, { row: i + 2, message: err.message || "Unknown API Error" }]);
+                    }
+                    
                     if (i % 5 === 0) {
                         setStatusMsg(`Uploading... ${i + 1} / ${jsonData.length}`);
                         await new Promise(resolve => setTimeout(resolve, 50));
                     }
                 }
-                setStatusMsg(`Completed! Uploaded ${successCount} records.`);
+                setStatusMsg(`Completed! Uploaded: ${successCount}, Failed: ${failCount}`);
                 setIsLoading(false);
-                alert(`Successfully uploaded ${successCount} records to SharePoint!`);
+                if (failCount > 0) {
+                    alert(`Upload finished with ${failCount} errors. Please check the error log below.`);
+                } else {
+                    alert(`Successfully uploaded ${successCount} records!`);
+                }
             };
             reader.readAsArrayBuffer(file);
         } catch (e: any) { setError(e.message); setIsLoading(false); }
@@ -166,7 +186,9 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         const file = e.target.files?.[0];
         if (!file || !selectedSite) return;
         setIsLoading(true);
+        setRowErrors([]); // Clear previous errors
         setStatusMsg("Reading Project Excel...");
+        
         const reader = new FileReader();
         reader.onload = async (event) => {
             try {
@@ -217,15 +239,26 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                             JSON_Data: JSON.stringify(row)
                         });
                         successCount++;
-                    } catch (err: any) { console.error(`Failed row ${i+1}:`, err); failCount++; }
+                    } catch (err: any) { 
+                        console.error(`Failed row ${i+1}:`, err); 
+                        failCount++;
+                        setRowErrors(prev => [...prev, { row: i + 2, message: err.message || "Unknown API Error" }]);
+                    }
+
                     if (i % 5 === 0) {
                         setStatusMsg(`Uploading project ${i + 1} of ${total}...`);
                         await new Promise(resolve => setTimeout(resolve, 100)); 
                     }
                 }
                 setStatusMsg(`Finished. Success: ${successCount}, Fail: ${failCount}`);
-                alert(`Project Import Complete!`);
-            } catch (err: any) { setError("Excel processing failed: " + err.message); } finally { setIsLoading(false); if (e.target) e.target.value = ''; }
+                setIsLoading(false);
+                if (failCount > 0) {
+                    alert(`Upload finished with ${failCount} errors. Please check the error log below.`);
+                } else {
+                    alert(`Successfully uploaded ${successCount} projects!`);
+                }
+
+            } catch (err: any) { setError("Excel processing failed: " + err.message); setIsLoading(false); } finally { if (e.target) e.target.value = ''; }
         };
         reader.readAsArrayBuffer(file);
     };
@@ -246,9 +279,35 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
             {step === 1 && selectedSite && (
                 <div className="space-y-6">
                     <div className="bg-slate-900 text-white p-4 rounded-xl flex justify-between items-center"><div><p className="text-xs text-slate-400 uppercase">Connected To</p><p className="font-bold">{selectedSite.displayName}</p></div><button onClick={() => setStep(0)} className="text-xs text-blue-400 hover:text-white">Change Site</button></div>
+                    
+                    {/* Status / Init */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><h3 className="font-bold text-slate-800 mb-4">1. Provision Lists</h3><p className="text-sm text-slate-500 mb-4">Ensure the required SharePoint lists exist.</p>{error && <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600"><strong>Error:</strong> {error} <div className="mt-2 flex gap-2"><button onClick={() => handleInitialize(true)} className="text-xs bg-white border border-red-200 px-2 py-1 rounded font-bold">Retry</button><button onClick={handleLogout} className="text-xs bg-red-600 text-white px-2 py-1 rounded font-bold">Log Out</button></div></div>}<button onClick={() => handleInitialize(true)} disabled={isLoading} className="bg-orange-600 text-white px-6 py-2 rounded-lg font-bold text-sm hover:bg-orange-700 disabled:opacity-50 shadow-sm">{isLoading ? "Processing..." : "Initialize Database"}</button>{statusMsg && <p className="mt-2 text-sm text-slate-600">{statusMsg}</p>}</div>
+                    
+                    {/* Purchase History */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><h3 className="font-bold text-slate-800 mb-4">2. Purchase History (Price Analysis)</h3><p className="text-sm text-slate-500 mb-4">Manage 'Carsan_Purchases' list.</p><div className="grid md:grid-cols-2 gap-4"><div className="border border-slate-200 rounded-lg p-4"><div className="flex items-center gap-2 mb-2 font-bold text-blue-700"><Upload className="w-4 h-4"/> Push (Upload)</div><div className="relative"><input type="file" onChange={handlePurchaseHistoryUpload} accept=".xlsx,.xls,.csv" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" disabled={isLoading} /><button className="w-full bg-blue-50 text-blue-700 border border-blue-200 py-2 rounded-lg text-sm font-bold hover:bg-blue-100">Import Excel</button></div></div><div className="border border-slate-200 rounded-lg p-4"><div className="flex items-center gap-2 mb-2 font-bold text-indigo-700"><RefreshCw className="w-4 h-4"/> Pull (Download)</div><button onClick={handlePurchaseSyncDown} disabled={isLoading || !setPurchases} className="w-full bg-indigo-600 text-white py-2 rounded-lg text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2">Sync Down from Cloud</button></div></div></div>
+                    
+                    {/* Projects */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><h3 className="font-bold text-slate-800 mb-4">3. Manage Projects</h3><p className="text-sm text-slate-500 mb-4">Sync project data with <strong>Carsan_Projects</strong>.</p><div className="grid md:grid-cols-2 gap-4"><div className="border border-slate-200 rounded-lg p-4"><div className="flex items-center gap-2 mb-2 font-bold text-emerald-700"><Upload className="w-4 h-4"/> Push (Upload)</div><div className="relative"><input type="file" onChange={handleExcelToCloud} accept=".xlsx,.xls,.csv" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" disabled={isLoading} /><button className="w-full bg-emerald-50 text-emerald-700 border border-emerald-200 py-2 rounded-lg text-sm font-bold hover:bg-emerald-100">Import Excel to Cloud</button></div></div><div className="border border-slate-200 rounded-lg p-4"><div className="flex items-center gap-2 mb-2 font-bold text-blue-700"><RefreshCw className="w-4 h-4"/> Pull (Download)</div><button onClick={handleSyncDown} disabled={isLoading || !setProjects} className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">{isLoading && statusMsg.includes("Downloading") ? <Loader2 className="w-3 h-3 animate-spin"/> : null} Sync Down from Cloud</button></div></div></div>
+                
+                    {/* ERROR LOGGING UI */}
+                    {rowErrors.length > 0 && (
+                        <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-xl animate-in slide-in-from-bottom-4">
+                            <div className="flex items-center justify-between mb-3">
+                                <h4 className="font-bold text-red-800 flex items-center gap-2">
+                                    <AlertTriangle className="w-4 h-4" /> Upload Errors ({rowErrors.length})
+                                </h4>
+                                <button onClick={() => setRowErrors([])} className="text-xs text-red-500 hover:underline font-bold">Clear Log</button>
+                            </div>
+                            <div className="max-h-60 overflow-y-auto text-xs font-mono text-red-700 bg-white p-3 rounded border border-red-100 shadow-inner custom-scrollbar">
+                                {rowErrors.map((e, idx) => (
+                                    <div key={idx} className="border-b border-red-50 last:border-0 py-1">
+                                        <span className="font-bold text-slate-500 mr-2">Row {e.row}:</span> 
+                                        {e.message}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
         </div>
