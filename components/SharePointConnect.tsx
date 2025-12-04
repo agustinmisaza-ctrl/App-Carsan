@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { Search, Upload, Loader2, Database, AlertTriangle, RefreshCw, LogOut, FileSpreadsheet, DollarSign } from 'lucide-react';
-import { searchSharePointSites, getSharePointLists, addListItem, SPSite, ensureCarsanLists, getAllProjects } from '../services/sharepointService';
+import { searchSharePointSites, getSharePointLists, addListItem, SPSite, ensureCarsanLists, getAllProjects, getAllPurchaseRecords } from '../services/sharepointService';
 import { normalizeSupplier, parseCurrency } from '../utils/purchaseData';
 import { signOut } from '../services/emailIntegration';
 
@@ -10,10 +10,12 @@ interface SharePointConnectProps {
     setProjects?: (projects: any[]) => void;
     materials: any[];
     tickets: any[];
+    purchases?: any[];
+    setPurchases?: (purchases: any[]) => void;
 }
 
-export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, setProjects, materials, tickets }) => {
-    const [step, setStep] = useState<number>(0); // 0: Select Site, 1: Action
+export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, setProjects, materials, tickets, purchases, setPurchases }) => {
+    const [step, setStep] = useState<number>(0);
     const [sites, setSites] = useState<SPSite[]>([]);
     const [selectedSite, setSelectedSite] = useState<SPSite | null>(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -26,17 +28,11 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         try {
             const results = await searchSharePointSites("");
             setSites(results);
-        } catch (e: any) {
-            setError(e.message || "Failed to fetch sites");
-        } finally {
-            setIsLoading(false);
-        }
+        } catch (e: any) { setError(e.message || "Failed to fetch sites"); } 
+        finally { setIsLoading(false); }
     };
 
-    const handleSelectSite = (site: SPSite) => {
-        setSelectedSite(site);
-        setStep(1);
-    };
+    const handleSelectSite = (site: SPSite) => { setSelectedSite(site); setStep(1); };
 
     const handleInitialize = async (forceNewToken = false) => {
         if (!selectedSite) return;
@@ -45,44 +41,46 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         setError(null);
         try {
             await ensureCarsanLists(selectedSite.id, forceNewToken);
-            setStatusMsg("Database Ready! Lists 'Carsan_Projects', 'Carsan_Materials', and 'Carsan_Purchases' verified.");
+            setStatusMsg("Database Ready! Lists verified.");
         } catch (e: any) {
             console.error("Init Error", e);
             setStatusMsg("Error creating lists.");
-            setError(e.message || "Access Denied. Check permissions.");
-        } finally {
-            setIsLoading(false);
-        }
+            setError(e.message || "Access Denied.");
+        } finally { setIsLoading(false); }
     };
 
-    const handleLogout = async () => {
-        await signOut();
-        window.location.reload();
-    };
+    const handleLogout = async () => { await signOut(); window.location.reload(); };
 
     const handleSyncDown = async () => {
         if (!selectedSite || !setProjects) return;
         setIsLoading(true);
-        setStatusMsg("Downloading projects from SharePoint...");
-        
+        setStatusMsg("Downloading projects...");
         try {
             const cloudProjects = await getAllProjects(selectedSite.id);
             if (cloudProjects.length > 0) {
                 setProjects(cloudProjects);
                 setStatusMsg(`Success! Downloaded ${cloudProjects.length} projects.`);
-                alert(`Sync Complete! Loaded ${cloudProjects.length} projects from the cloud.`);
-            } else {
-                setStatusMsg("No projects found in the cloud list.");
-            }
-        } catch (e: any) {
-            console.error(e);
-            setError("Failed to download: " + e.message);
-        } finally {
-            setIsLoading(false);
-        }
+                alert(`Sync Complete! Loaded ${cloudProjects.length} projects.`);
+            } else { setStatusMsg("No projects found in cloud."); }
+        } catch (e: any) { setError("Failed to download: " + e.message); } 
+        finally { setIsLoading(false); }
     };
 
-    // ... (Rest of the file logic for parseExcelDate, handlePurchaseHistoryUpload, handleExcelToCloud remains the same as v5.2, I will include it for completeness to overwrite the file)
+    const handlePurchaseSyncDown = async () => {
+        if (!selectedSite || !setPurchases) return;
+        setIsLoading(true);
+        setStatusMsg("Downloading purchase history...");
+        try {
+            const cloudPurchases = await getAllPurchaseRecords(selectedSite.id);
+            if (cloudPurchases.length > 0) {
+                setPurchases(cloudPurchases);
+                setStatusMsg(`Success! Downloaded ${cloudPurchases.length} records.`);
+                alert(`Sync Complete! Loaded ${cloudPurchases.length} purchase records.`);
+            } else { setStatusMsg("No purchase records found in cloud."); }
+        } catch (e: any) { setError("Failed to download: " + e.message); } 
+        finally { setIsLoading(false); }
+    };
+
     const parseExcelDate = (val: any) => {
         if (!val) return null;
         if (typeof val === 'number') return new Date(Math.round((val - 25569) * 86400 * 1000)).toISOString();
@@ -100,23 +98,19 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
     const handlePurchaseHistoryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file || !selectedSite) return;
-
         setIsLoading(true);
         setStatusMsg("Reading Excel...");
-        
         try {
             const lists = await getSharePointLists(selectedSite.id);
             const purchaseList = lists.find(l => l.displayName === 'Carsan_Purchases');
-            if (!purchaseList) throw new Error("List 'Carsan_Purchases' not found. Please click 'Initialize Database' first.");
+            if (!purchaseList) throw new Error("List 'Carsan_Purchases' not found.");
 
             const reader = new FileReader();
             reader.onload = async (event) => {
                 const data = event.target?.result;
                 const workbook = XLSX.read(data, { type: 'array' });
-                const sheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[sheetName];
+                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
                 const jsonData = XLSX.utils.sheet_to_json(worksheet);
-
                 setStatusMsg(`Uploading ${jsonData.length} records...`);
                 let successCount = 0;
 
@@ -140,8 +134,8 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
 
                         await addListItem(selectedSite.id, purchaseList.id, {
                             Title: `PO-${findVal(row, ['Purchase Order #', 'PO Number', 'PO']) || i}`,
-                            PurchaseDate: parseExcelDate(findVal(row, ['Date', 'Invoice Date', 'PurchaseDate'])),
-                            PO_Number: String(findVal(row, ['Purchase Order #', 'PO Number', 'PO']) || ''),
+                            PurchaseDate: parseExcelDate(findVal(row, ['Date', 'Invoice Date'])),
+                            PO_Number: String(findVal(row, ['Purchase Order #', 'PO']) || ''),
                             Brand: String(findVal(row, ['Brand']) || ''),
                             Item_Description: String(findVal(row, ['Item', 'Item Description']) || ''),
                             Quantity: quantity,
@@ -155,7 +149,6 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                         });
                         successCount++;
                     } catch (err) { console.error("Row upload failed", err); }
-                    
                     if (i % 5 === 0) {
                         setStatusMsg(`Uploading... ${i + 1} / ${jsonData.length}`);
                         await new Promise(resolve => setTimeout(resolve, 50));
@@ -168,14 +161,12 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
             reader.readAsArrayBuffer(file);
         } catch (e: any) { setError(e.message); setIsLoading(false); }
     };
-    
+
     const handleExcelToCloud = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file || !selectedSite) return;
-
         setIsLoading(true);
         setStatusMsg("Reading Project Excel...");
-
         const reader = new FileReader();
         reader.onload = async (event) => {
             try {
@@ -183,15 +174,13 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                 const workbook = XLSX.read(data, { type: 'array' });
                 const worksheet = workbook.Sheets[workbook.SheetNames[0]];
                 const jsonData = XLSX.utils.sheet_to_json(worksheet);
-
                 const lists = await getSharePointLists(selectedSite.id);
                 const projectList = lists.find((l: any) => l.displayName === 'Carsan_Projects');
-                if (!projectList) throw new Error("List 'Carsan_Projects' not found. Initialize Database first.");
+                if (!projectList) throw new Error("List 'Carsan_Projects' not found.");
 
                 let successCount = 0;
                 let failCount = 0;
                 const total = jsonData.length;
-
                 setStatusMsg(`Uploading ${total} projects...`);
 
                 for (let i = 0; i < total; i++) {
@@ -204,7 +193,6 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                         }
                         return undefined;
                     };
-
                     const name = findVal(['Project Name', 'Title', 'Project']) || 'Untitled';
                     const client = findVal(['Client', 'Customer']) || 'Unknown';
                     const value = parseCurrency(String(findVal(['Value', 'Amount', 'Total']) || 0));
@@ -229,20 +217,14 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                             JSON_Data: JSON.stringify(row)
                         });
                         successCount++;
-                    } catch (err: any) {
-                        console.error(`Failed row ${i+1}:`, err);
-                        failCount++;
-                    }
-
+                    } catch (err: any) { console.error(`Failed row ${i+1}:`, err); failCount++; }
                     if (i % 5 === 0) {
                         setStatusMsg(`Uploading project ${i + 1} of ${total}...`);
                         await new Promise(resolve => setTimeout(resolve, 100)); 
                     }
                 }
-
                 setStatusMsg(`Finished. Success: ${successCount}, Fail: ${failCount}`);
-                alert(`Project Import Complete!\nUploaded: ${successCount}\nFailed: ${failCount}`);
-
+                alert(`Project Import Complete!`);
             } catch (err: any) { setError("Excel processing failed: " + err.message); } finally { setIsLoading(false); if (e.target) e.target.value = ''; }
         };
         reader.readAsArrayBuffer(file);
@@ -250,76 +232,23 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
 
     return (
         <div className="p-8 max-w-4xl mx-auto">
-            <h1 className="text-2xl font-bold mb-6 flex items-center gap-2">
-                <Database className="w-8 h-8 text-blue-600" /> Cloud Database Manager
-            </h1>
-            
+            <h1 className="text-2xl font-bold mb-6 flex items-center gap-2"><Database className="w-8 h-8 text-blue-600" /> Cloud Database Manager</h1>
             {step === 0 && (
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                     <h2 className="text-lg font-bold mb-4">Select SharePoint Site</h2>
-                    <div className="bg-blue-50 p-4 rounded-lg mb-6 text-sm text-blue-800 border border-blue-100">
-                        <p className="font-bold mb-1">Vercel Redirect URI</p>
-                        <p className="mb-1">Ensure this URL is added to your Azure App Registration:</p> 
-                        <code className="bg-white px-2 py-1 rounded border text-slate-700 select-all">{window.location.origin}</code>
-                    </div>
+                    <div className="bg-blue-50 p-4 rounded-lg mb-6 text-sm text-blue-800 border border-blue-100"><p className="font-bold mb-1">Vercel Redirect URI</p><code className="bg-white px-2 py-1 rounded border text-slate-700 select-all">{window.location.origin}</code></div>
                     <button onClick={handleSearchSites} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 mb-4 hover:bg-blue-700"><Search className="w-4 h-4" /> Scan for Sites</button>
                     {isLoading && <Loader2 className="w-6 h-6 animate-spin text-blue-500" />}
                     {error && <div className="text-red-500 bg-red-50 p-3 rounded mb-4">{error}</div>}
                     <div className="space-y-2">{sites.map(site => (<div key={site.id} onClick={() => handleSelectSite(site)} className="p-3 border border-slate-200 rounded hover:bg-blue-50 cursor-pointer flex justify-between items-center"><span className="font-medium">{site.displayName}</span><span className="text-xs text-slate-400">{site.webUrl}</span></div>))}</div>
                 </div>
             )}
-
             {step === 1 && selectedSite && (
                 <div className="space-y-6">
-                    <div className="bg-slate-900 text-white p-4 rounded-xl flex justify-between items-center">
-                        <div><p className="text-xs text-slate-400 uppercase">Connected To</p><p className="font-bold">{selectedSite.displayName}</p></div>
-                        <button onClick={() => setStep(0)} className="text-xs text-blue-400 hover:text-white">Change Site</button>
-                    </div>
-
-                    {/* Database Initialization */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                        <h3 className="font-bold text-slate-800 mb-4">1. Provision Lists</h3>
-                        <p className="text-sm text-slate-500 mb-4">Ensure the required SharePoint lists exist.</p>
-                        {error && <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600"><strong>Error:</strong> {error} <div className="mt-2 flex gap-2"><button onClick={() => handleInitialize(true)} className="text-xs bg-white border border-red-200 px-2 py-1 rounded font-bold">Retry</button><button onClick={handleLogout} className="text-xs bg-red-600 text-white px-2 py-1 rounded font-bold">Log Out</button></div></div>}
-                        <button onClick={() => handleInitialize(true)} disabled={isLoading} className="bg-orange-600 text-white px-6 py-2 rounded-lg font-bold text-sm hover:bg-orange-700 disabled:opacity-50 shadow-sm">{isLoading ? "Processing..." : "Initialize Database"}</button>
-                        {statusMsg && <p className="mt-2 text-sm text-slate-600">{statusMsg}</p>}
-                    </div>
-
-                    {/* Purchase History Upload */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                        <h3 className="font-bold text-slate-800 mb-4">2. Upload Purchase History (Price Analysis)</h3>
-                        <p className="text-sm text-slate-500 mb-4">Bulk upload Excel data to <strong>Carsan_Purchases</strong>.</p>
-                        <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-blue-500 transition-colors cursor-pointer relative">
-                             <input type="file" onChange={handlePurchaseHistoryUpload} accept=".xlsx,.xls,.csv" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" disabled={isLoading} />
-                             {isLoading && statusMsg.includes("Uploading") ? <div className="flex flex-col items-center"><Loader2 className="w-8 h-8 text-blue-500 animate-spin mb-2" /><p className="text-blue-600 font-bold">{statusMsg}</p></div> : <div className="flex flex-col items-center text-slate-400"><Upload className="w-8 h-8 mb-2" /><p className="font-medium text-slate-600">Click to Upload Purchase Excel</p></div>}
-                        </div>
-                    </div>
-
-                    {/* Project Sync */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                        <h3 className="font-bold text-slate-800 mb-4">3. Manage Projects</h3>
-                        <p className="text-sm text-slate-500 mb-4">Sync project data with <strong>Carsan_Projects</strong>.</p>
-                        <div className="grid md:grid-cols-2 gap-4">
-                            <div className="border border-slate-200 rounded-lg p-4">
-                                <div className="flex items-center gap-2 mb-2 font-bold text-indigo-700"><Upload className="w-4 h-4"/> Push (Upload)</div>
-                                <div className="relative">
-                                    <input type="file" onChange={handleExcelToCloud} accept=".xlsx,.xls,.csv" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" disabled={isLoading} />
-                                    <button className="w-full bg-indigo-50 text-indigo-700 border border-indigo-200 py-2 rounded-lg text-sm font-bold hover:bg-indigo-100">Import Excel to Cloud</button>
-                                </div>
-                            </div>
-                            <div className="border border-slate-200 rounded-lg p-4">
-                                <div className="flex items-center gap-2 mb-2 font-bold text-blue-700"><RefreshCw className="w-4 h-4"/> Pull (Download)</div>
-                                <button 
-                                    onClick={handleSyncDown}
-                                    disabled={isLoading || !setProjects}
-                                    className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
-                                >
-                                    {isLoading && statusMsg.includes("Downloading") ? <Loader2 className="w-3 h-3 animate-spin"/> : null}
-                                    Sync Down from Cloud
-                                </button>
-                            </div>
-                        </div>
-                    </div>
+                    <div className="bg-slate-900 text-white p-4 rounded-xl flex justify-between items-center"><div><p className="text-xs text-slate-400 uppercase">Connected To</p><p className="font-bold">{selectedSite.displayName}</p></div><button onClick={() => setStep(0)} className="text-xs text-blue-400 hover:text-white">Change Site</button></div>
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><h3 className="font-bold text-slate-800 mb-4">1. Provision Lists</h3><p className="text-sm text-slate-500 mb-4">Ensure the required SharePoint lists exist.</p>{error && <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600"><strong>Error:</strong> {error} <div className="mt-2 flex gap-2"><button onClick={() => handleInitialize(true)} className="text-xs bg-white border border-red-200 px-2 py-1 rounded font-bold">Retry</button><button onClick={handleLogout} className="text-xs bg-red-600 text-white px-2 py-1 rounded font-bold">Log Out</button></div></div>}<button onClick={() => handleInitialize(true)} disabled={isLoading} className="bg-orange-600 text-white px-6 py-2 rounded-lg font-bold text-sm hover:bg-orange-700 disabled:opacity-50 shadow-sm">{isLoading ? "Processing..." : "Initialize Database"}</button>{statusMsg && <p className="mt-2 text-sm text-slate-600">{statusMsg}</p>}</div>
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><h3 className="font-bold text-slate-800 mb-4">2. Purchase History (Price Analysis)</h3><p className="text-sm text-slate-500 mb-4">Manage 'Carsan_Purchases' list.</p><div className="grid md:grid-cols-2 gap-4"><div className="border border-slate-200 rounded-lg p-4"><div className="flex items-center gap-2 mb-2 font-bold text-blue-700"><Upload className="w-4 h-4"/> Push (Upload)</div><div className="relative"><input type="file" onChange={handlePurchaseHistoryUpload} accept=".xlsx,.xls,.csv" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" disabled={isLoading} /><button className="w-full bg-blue-50 text-blue-700 border border-blue-200 py-2 rounded-lg text-sm font-bold hover:bg-blue-100">Import Excel</button></div></div><div className="border border-slate-200 rounded-lg p-4"><div className="flex items-center gap-2 mb-2 font-bold text-indigo-700"><RefreshCw className="w-4 h-4"/> Pull (Download)</div><button onClick={handlePurchaseSyncDown} disabled={isLoading || !setPurchases} className="w-full bg-indigo-600 text-white py-2 rounded-lg text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2">Sync Down from Cloud</button></div></div></div>
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><h3 className="font-bold text-slate-800 mb-4">3. Manage Projects</h3><p className="text-sm text-slate-500 mb-4">Sync project data with <strong>Carsan_Projects</strong>.</p><div className="grid md:grid-cols-2 gap-4"><div className="border border-slate-200 rounded-lg p-4"><div className="flex items-center gap-2 mb-2 font-bold text-emerald-700"><Upload className="w-4 h-4"/> Push (Upload)</div><div className="relative"><input type="file" onChange={handleExcelToCloud} accept=".xlsx,.xls,.csv" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" disabled={isLoading} /><button className="w-full bg-emerald-50 text-emerald-700 border border-emerald-200 py-2 rounded-lg text-sm font-bold hover:bg-emerald-100">Import Excel to Cloud</button></div></div><div className="border border-slate-200 rounded-lg p-4"><div className="flex items-center gap-2 mb-2 font-bold text-blue-700"><RefreshCw className="w-4 h-4"/> Pull (Download)</div><button onClick={handleSyncDown} disabled={isLoading || !setProjects} className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">{isLoading && statusMsg.includes("Downloading") ? <Loader2 className="w-3 h-3 animate-spin"/> : null} Sync Down from Cloud</button></div></div></div>
                 </div>
             )}
         </div>
