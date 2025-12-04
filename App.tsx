@@ -32,7 +32,7 @@ const loadState = <T,>(key: string, fallback: T): T => {
 
 export const App: React.FC = () => {
     useEffect(() => {
-        console.log("Carsan Electric App v6.0 - Dashboard Restore");
+        console.log("Carsan Electric App v6.1 - Manual Build Fix");
     }, []);
 
     const [user, setUser] = useState<User | null>(null);

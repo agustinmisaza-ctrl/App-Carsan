@@ -6,7 +6,7 @@ interface LoginProps {
   onLogin: (user: User) => void;
 }
 
-// Updated User List
+// Updated User List - Manual Fix
 const INITIAL_USERS = [
     {
         id: '1',
@@ -40,7 +40,7 @@ const INITIAL_USERS = [
         username: 'michael',
         password: 'temp123',
         name: 'Michael Procurement',
-        role: 'technician' as UserRole, // Procurement (Technician/Admin access)
+        role: 'technician' as UserRole, 
         avatarInitials: 'MP',
         mustChangePassword: true
     },
@@ -66,38 +66,24 @@ const INITIAL_USERS = [
 
 export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [view, setView] = useState<'LOGIN' | 'CHANGE_PASSWORD'>('LOGIN');
-  
-  // Login State
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  
-  // User Database State (Persistent)
   const [users, setUsers] = useState<typeof INITIAL_USERS>([]);
-
-  // Change Password State
   const [pendingUser, setPendingUser] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-
-  // Logo State
   const [customLogo, setCustomLogo] = useState<string | null>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-      // Load Custom Logo
       const savedLogo = localStorage.getItem('carsan_custom_logo');
       if (savedLogo) setCustomLogo(savedLogo);
 
-      // Load Users
       const savedUsers = localStorage.getItem('carsan_users');
       if (savedUsers) {
-          try {
-              setUsers(JSON.parse(savedUsers));
-          } catch (e) {
-              setUsers(INITIAL_USERS);
-          }
+          try { setUsers(JSON.parse(savedUsers)); } catch (e) { setUsers(INITIAL_USERS); }
       } else {
           setUsers(INITIAL_USERS);
           localStorage.setItem('carsan_users', JSON.stringify(INITIAL_USERS));
@@ -141,13 +127,8 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     e.preventDefault();
     setError('');
     setLoading(true);
-
     setTimeout(() => {
-      const userFound = users.find(u => 
-          u.username.toLowerCase() === username.trim().toLowerCase() && 
-          u.password === password
-      );
-
+      const userFound = users.find(u => u.username.toLowerCase() === username.trim().toLowerCase() && u.password === password);
       if (userFound) {
           if (userFound.mustChangePassword) {
               setPendingUser(userFound);
@@ -167,31 +148,14 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
       e.preventDefault();
       setError('');
       setLoading(true);
-
-      if (newPassword.length < 6) {
-          setError('Password must be at least 6 characters.');
-          setLoading(false);
-          return;
-      }
-
-      if (newPassword !== confirmPassword) {
-          setError('Passwords do not match.');
-          setLoading(false);
-          return;
-      }
+      if (newPassword.length < 6) { setError('Password must be at least 6 characters.'); setLoading(false); return; }
+      if (newPassword !== confirmPassword) { setError('Passwords do not match.'); setLoading(false); return; }
 
       setTimeout(() => {
           if (pendingUser) {
-             const updatedUsers = users.map(u => {
-                 if (u.id === pendingUser.id) {
-                     return { ...u, password: newPassword, mustChangePassword: false };
-                 }
-                 return u;
-             });
-             
+             const updatedUsers = users.map(u => u.id === pendingUser.id ? { ...u, password: newPassword, mustChangePassword: false } : u);
              setUsers(updatedUsers);
              localStorage.setItem('carsan_users', JSON.stringify(updatedUsers));
-
              onLogin({ ...pendingUser, mustChangePassword: false });
           }
       }, 600);
@@ -200,35 +164,24 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col">
-        {/* Header */}
         <div className="bg-slate-900 p-8 text-center relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-full bg-blue-600/10 z-0"></div>
           <div className="relative z-10 flex flex-col items-center">
-            <div 
-                className="w-20 h-20 bg-white rounded-xl flex items-center justify-center shadow-lg mb-4 cursor-pointer group relative overflow-hidden"
-                onClick={() => logoInputRef.current?.click()}
-                title="Click to upload logo"
-            >
+            <div className="w-20 h-20 bg-white rounded-xl flex items-center justify-center shadow-lg mb-4 cursor-pointer group relative overflow-hidden" onClick={() => logoInputRef.current?.click()} title="Click to upload logo">
                 <input type="file" ref={logoInputRef} accept="image/*" className="hidden" onChange={handleLogoUpload} />
-                {customLogo ? (
-                    <img src={customLogo} alt="Logo" className="w-full h-full object-contain p-1" />
-                ) : (
+                {customLogo ? <img src={customLogo} alt="Logo" className="w-full h-full object-contain p-1" /> : (
                     <svg width="48" height="48" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <path d="M6 34V15L13 8V34H6Z" fill="#2563EB"/>
                         <path d="M15 34L15 8L20 13L25 8L25 34L20 29L15 34Z" fill="#2563EB"/>
                         <path d="M27 34V8L34 15V34H27Z" fill="#2563EB"/>
                     </svg>
                 )}
-                <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Upload className="w-6 h-6 text-white" />
-                </div>
+                <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><Upload className="w-6 h-6 text-white" /></div>
             </div>
             <h1 className="text-2xl font-bold text-white tracking-tight">CARSAN ELECTRIC</h1>
             <p className="text-blue-200 text-sm mt-1">Professional Electrical Company</p>
           </div>
         </div>
-
-        {/* Form */}
         <div className="p-8">
             {view === 'LOGIN' ? (
                 <form onSubmit={handleLogin} className="space-y-6 animate-in fade-in slide-in-from-right-8 duration-300">

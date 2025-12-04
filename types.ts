@@ -1,4 +1,3 @@
-
 export enum ViewState {
   DASHBOARD = 'DASHBOARD',
   PROJECTS = 'PROJECTS',
@@ -144,4 +143,13 @@ export interface VarianceItem {
   costVariance: number; // Positive means over budget
   qtyVariance: number; // Positive means bought more than estimated
   status: 'OK' | 'Over Budget' | 'Over Quantity' | 'Critical' | 'Unplanned';
+}
+
+export interface AuditLog {
+    id: string;
+    userId: string;
+    userName: string;
+    action: string;
+    details: string;
+    timestamp: string;
 }
