@@ -532,6 +532,13 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
 
   const activeChangeOrders = (projectId: string) => tickets.filter(t => t.projectId === projectId);
 
+  const handleClearProjects = () => {
+      if (confirm("Are you sure you want to clear the entire Project Database? This cannot be undone.")) {
+          setProjects([]);
+          alert("Database cleared.");
+      }
+  };
+
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6 h-full flex flex-col">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 shrink-0">
@@ -631,6 +638,14 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
                     title="Download Template"
                 >
                     <Download className="w-5 h-5 text-blue-600" />
+                </button>
+
+                <button 
+                    onClick={handleClearProjects}
+                    className="p-2.5 rounded-lg border border-red-200 bg-white text-red-500 hover:bg-red-50 transition-colors"
+                    title="Clear Database"
+                >
+                    <Trash2 className="w-5 h-5" />
                 </button>
             </div>
 
