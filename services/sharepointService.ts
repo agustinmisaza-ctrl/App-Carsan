@@ -68,7 +68,6 @@ export const getListColumns = async (siteId: string, listId: string): Promise<SP
     return data.value.map((c: any) => ({ name: c.name, displayName: c.displayName }));
 };
 
-// FIX: Pagination Implemented
 export const getListItems = async (siteId: string, listId: string): Promise<SPItem[]> => {
     const token = await getGraphToken(SCOPES);
     let items: SPItem[] = [];
@@ -234,6 +233,19 @@ export const addListItem = async (siteId: string, listId: string, fields: any, f
         const err = await res.json();
         throw new Error(err.error?.message || "Failed to add item");
     }
+};
+
+export const updateListItem = async (siteId: string, listId: string, itemId: string, fields: any): Promise<void> => {
+    const token = await getGraphToken(SCOPES);
+    const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, {
+        method: 'PATCH',
+        headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(fields)
+    });
+    if (!res.ok) throw new Error("Failed to update item");
 };
 
 export const ensureCarsanLists = async (siteId: string, forceToken = false) => {
