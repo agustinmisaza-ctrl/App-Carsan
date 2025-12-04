@@ -29,12 +29,9 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
     const [rowErrors, setRowErrors] = useState<RowError[]>([]);
 
     const handleSearchSites = async () => {
-        setIsLoading(true);
-        setError(null);
-        try {
-            const results = await searchSharePointSites("");
-            setSites(results);
-        } catch (e: any) { setError(e.message || "Failed to fetch sites"); } 
+        setIsLoading(true); setError(null);
+        try { const results = await searchSharePointSites(""); setSites(results); } 
+        catch (e: any) { setError(e.message || "Failed to fetch sites"); } 
         finally { setIsLoading(false); }
     };
 
@@ -42,12 +39,10 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
 
     const handleInitialize = async (forceNewToken = false) => {
         if (!selectedSite) return;
-        setIsLoading(true);
-        setStatusMsg("Initializing Database Lists...");
-        setError(null);
+        setIsLoading(true); setStatusMsg("Initializing Database Lists (Checking Schema)..."); setError(null);
         try {
             await ensureCarsanLists(selectedSite.id, forceNewToken);
-            setStatusMsg("Database Ready! Lists verified.");
+            setStatusMsg("Database Ready! Lists verified and columns updated.");
         } catch (e: any) {
             console.error("Init Error", e);
             setStatusMsg("Error creating lists.");
@@ -59,80 +54,64 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
 
     const handleSyncDown = async () => {
         if (!selectedSite || !setProjects) return;
-        setIsLoading(true);
-        setStatusMsg("Downloading projects from SharePoint (this may take a moment)...");
-        
+        setIsLoading(true); setStatusMsg("Downloading projects...");
         try {
             const cloudProjects = await getAllProjects(selectedSite.id);
             if (cloudProjects.length > 0) {
                 setProjects(cloudProjects);
                 setStatusMsg(`Success! Downloaded ${cloudProjects.length} projects.`);
                 alert(`Sync Complete! Loaded ${cloudProjects.length} projects.`);
-            } else {
-                setStatusMsg("No projects found in the cloud list.");
-            }
-        } catch (e: any) {
-            console.error(e);
-            setError("Failed to download: " + e.message);
-        } finally {
-            setIsLoading(false);
-        }
+            } else { setStatusMsg("No projects found in cloud."); }
+        } catch (e: any) { console.error(e); setError("Failed: " + e.message); } 
+        finally { setIsLoading(false); }
     };
 
     const handlePurchaseSyncDown = async () => {
         if (!selectedSite || !setPurchases) return;
-        setIsLoading(true);
-        setStatusMsg("Downloading purchase history (checking all pages)...");
-        
+        setIsLoading(true); setStatusMsg("Downloading purchase history...");
         try {
             const cloudPurchases = await getAllPurchaseRecords(selectedSite.id);
             if (cloudPurchases.length > 0) {
                 setPurchases(cloudPurchases);
                 setStatusMsg(`Success! Downloaded ${cloudPurchases.length} records.`);
                 alert(`Sync Complete! Loaded ${cloudPurchases.length} purchase records.`);
-            } else {
-                setStatusMsg("No purchase records found in the cloud list.");
-            }
-        } catch (e: any) {
-            console.error(e);
-            setError("Failed to download: " + e.message);
-        } finally {
-            setIsLoading(false);
-        }
+            } else { setStatusMsg("No purchase records found in cloud."); }
+        } catch (e: any) { console.error(e); setError("Failed: " + e.message); } 
+        finally { setIsLoading(false); }
     };
 
-    // FIX: Smart Date Parsing for 1969 Issue
+    // --- CRITICAL FIX: DD/MM/YYYY Date Parsing ---
     const parseExcelDate = (val: any) => {
         if (!val) return null;
-        // Excel Serial Number
+        
+        // 1. Handle Excel Serial Numbers (e.g. 45321)
         if (typeof val === 'number') {
             return new Date(Math.round((val - 25569) * 86400 * 1000)).toISOString();
         }
         
+        // 2. Handle Strings
         if (typeof val === 'string') {
-            let d = new Date(val);
-            // Check for DD/MM/YYYY (e.g. 25/12/2024) - common in Excel exports
-            if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(val)) {
-                const parts = val.split('/');
-                // Convert to YYYY-MM-DD for constructor
-                d = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
-            }
+            let cleanVal = val.trim();
             
-            // Check for valid year (>1970) to avoid the "Beginning of Time" error
+            // Check for DD/MM/YYYY (e.g. 25/12/2024 or 1/2/2025)
+            const dmyMatch = cleanVal.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
+            if (dmyMatch) {
+                // dmyMatch[1] = Day, [2] = Month, [3] = Year
+                // Construct proper ISO string YYYY-MM-DD
+                const d = new Date(`${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`);
+                if (!isNaN(d.getTime())) return d.toISOString();
+            }
+
+            // Fallback: Try standard Date parsing (for ISO strings or MM/DD/YYYY)
+            const d = new Date(cleanVal);
             if (!isNaN(d.getTime()) && d.getFullYear() > 1970) return d.toISOString();
         }
-        // Default fallback to avoid crashing, but maybe better to return null?
-        // For now returning ISO string of current date to be safe
-        return new Date().toISOString(); 
+        return null; // Return null if invalid, so SharePoint ignores it rather than crashing
     };
 
     const handlePurchaseHistoryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file || !selectedSite) return;
-        setIsLoading(true);
-        setRowErrors([]);
-        setStatusMsg("Reading Excel...");
-        
+        const file = e.target.files?.[0]; if (!file || !selectedSite) return;
+        setIsLoading(true); setRowErrors([]); setStatusMsg("Reading Excel...");
         try {
             const lists = await getSharePointLists(selectedSite.id);
             const purchaseList = lists.find(l => l.displayName === 'Carsan_Purchases');
@@ -142,12 +121,9 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
             reader.onload = async (event) => {
                 const data = event.target?.result;
                 const workbook = XLSX.read(data, { type: 'array' });
-                const sheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[sheetName];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
                 setStatusMsg(`Uploading ${jsonData.length} records...`);
-                let successCount = 0;
-                let failCount = 0;
+                let successCount = 0; let failCount = 0;
 
                 const findVal = (row: any, keys: string[]) => {
                     const rowKeys = Object.keys(row);
@@ -159,73 +135,51 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                     return undefined;
                 };
 
-                const chunkSize = 5; // Batch size
                 for (let i = 0; i < jsonData.length; i++) {
                     const row: any = jsonData[i];
                     try {
-                        const unitCost = parseCurrency(String(findVal(row, ['Unit Cost', 'Price', 'Rate']) || 0));
-                        const tax = parseCurrency(String(findVal(row, ['TAX', 'Tax', 'Vat']) || 0));
-                        const totalCost = parseCurrency(String(findVal(row, ['Total', 'Total Cost']) || 0));
-                        const quantity = Number(findVal(row, ['Quantity', 'Qty']) || 0);
-
                         await addListItem(selectedSite.id, purchaseList.id, {
-                            Title: `PO-${findVal(row, ['Purchase Order #', 'PO Number', 'PO']) || i}`,
-                            PurchaseDate: parseExcelDate(findVal(row, ['Date', 'Invoice Date', 'PurchaseDate'])),
-                            PO_Number: String(findVal(row, ['Purchase Order #', 'PO Number', 'PO']) || ''),
+                            Title: `PO-${findVal(row, ['PO Number', 'PO']) || i}`,
+                            PurchaseDate: parseExcelDate(findVal(row, ['Date', 'Invoice Date'])),
+                            PO_Number: String(findVal(row, ['PO Number', 'PO']) || ''),
                             Brand: String(findVal(row, ['Brand']) || ''),
                             Item_Description: String(findVal(row, ['Item', 'Item Description']) || ''),
-                            Quantity: quantity,
-                            Unit_Cost: unitCost,
-                            Tax: tax,
-                            Total_Cost: totalCost || (quantity * unitCost),
-                            Supplier: normalizeSupplier(String(findVal(row, ['Supplier', 'Vendor']) || '')),
-                            Project_Name: String(findVal(row, ['Project', 'Project Name']) || ''),
-                            Item_Type: String(findVal(row, ['TYPE', 'Type', 'Category']) || ''),
+                            Quantity: Number(findVal(row, ['Quantity', 'Qty']) || 0),
+                            Unit_Cost: parseCurrency(String(findVal(row, ['Unit Cost', 'Price']) || 0)),
+                            Tax: parseCurrency(String(findVal(row, ['TAX', 'Tax']) || 0)),
+                            Total_Cost: parseCurrency(String(findVal(row, ['Total', 'Total Cost']) || 0)),
+                            Supplier: normalizeSupplier(String(findVal(row, ['Supplier']) || '')),
+                            Project_Name: String(findVal(row, ['Project']) || ''),
+                            Item_Type: String(findVal(row, ['TYPE']) || ''),
                             JSON_Data: JSON.stringify(row)
                         });
                         successCount++;
-                    } catch (err: any) { 
-                        console.error("Row upload failed", err); 
-                        failCount++;
-                        setRowErrors(prev => [...prev, { row: i + 2, message: err.message }]);
-                    }
-                    
-                    if (i % 5 === 0) {
-                        setStatusMsg(`Uploading... ${i + 1} / ${jsonData.length}`);
-                        await new Promise(resolve => setTimeout(resolve, 50));
-                    }
+                    } catch (err: any) { failCount++; setRowErrors(prev => [...prev, { row: i + 2, message: err.message }]); }
+                    if (i % 5 === 0) { setStatusMsg(`Uploading... ${i + 1} / ${jsonData.length}`); await new Promise(resolve => setTimeout(resolve, 50)); }
                 }
-                setStatusMsg(`Completed! Uploaded: ${successCount}, Failed: ${failCount}`);
-                setIsLoading(false);
-                alert(`Upload finished! Success: ${successCount}, Failed: ${failCount}`);
+                setStatusMsg(`Finished. Success: ${successCount}, Fail: ${failCount}`); setIsLoading(false); alert(`Uploaded ${successCount} records.`);
             };
             reader.readAsArrayBuffer(file);
         } catch (e: any) { setError(e.message); setIsLoading(false); }
     };
 
     const handleExcelToCloud = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file || !selectedSite) return;
-        setIsLoading(true);
-        setRowErrors([]);
-        setStatusMsg("Reading Project Excel...");
+        const file = e.target.files?.[0]; if (!file || !selectedSite) return;
+        setIsLoading(true); setRowErrors([]); setStatusMsg("Reading Project Excel...");
         const reader = new FileReader();
         reader.onload = async (event) => {
             try {
                 const data = event.target?.result;
                 const workbook = XLSX.read(data, { type: 'array' });
-                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
                 const lists = await getSharePointLists(selectedSite.id);
                 const projectList = lists.find((l: any) => l.displayName === 'Carsan_Projects');
                 if (!projectList) throw new Error("List 'Carsan_Projects' not found.");
 
-                let successCount = 0;
-                let failCount = 0;
-                const total = jsonData.length;
-                setStatusMsg(`Uploading ${total} projects...`);
+                let successCount = 0; let failCount = 0;
+                setStatusMsg(`Uploading ${jsonData.length} projects...`);
 
-                for (let i = 0; i < total; i++) {
+                for (let i = 0; i < jsonData.length; i++) {
                     const row: any = jsonData[i];
                     const findVal = (keys: string[]) => {
                         const rowKeys = Object.keys(row);
@@ -235,44 +189,34 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                         }
                         return undefined;
                     };
-                    const name = findVal(['Project Name', 'Title', 'Project']) || 'Untitled';
-                    const client = findVal(['Client', 'Customer']) || 'Unknown';
-                    const value = parseCurrency(String(findVal(['Value', 'Amount', 'Total']) || 0));
-                    const statusVal = findVal(['Status']) || 'Draft';
-                    const address = findVal(['ADDRESS', 'Address', 'Location']) || '';
-                    const estimator = findVal(['Estimator', 'Owner']) || '';
-                    const deliveryDate = parseExcelDate(findVal(['Delivery Date', 'Due Date']));
-                    const expirationDate = parseExcelDate(findVal(['Expiration Date', 'Valid Until']));
-                    const awardedDate = parseExcelDate(findVal(['Awarded Date', 'Start Date']));
 
                     try {
+                        // Use the strict date parser
+                        const deliveryDate = parseExcelDate(findVal(['Delivery Date', 'Due Date']));
+                        const expirationDate = parseExcelDate(findVal(['Expiration Date', 'Valid Until']));
+                        const awardedDate = parseExcelDate(findVal(['Awarded Date', 'Start Date']));
+
                         await addListItem(selectedSite.id, projectList.id, {
-                            Title: name,
-                            Client: client,
-                            Status: statusVal,
-                            Value: value,
-                            ADDRESS: address,
-                            Estimator: estimator,
-                            'Delivery Date': deliveryDate,
+                            Title: findVal(['Project Name', 'Title', 'Project']) || 'Untitled',
+                            Client: findVal(['Client', 'Customer']) || 'Unknown',
+                            Status: findVal(['Status']) || 'Draft',
+                            Value: parseCurrency(String(findVal(['Value', 'Total']) || 0)),
+                            ADDRESS: findVal(['ADDRESS', 'Address', 'Location']) || '',
+                            Estimator: findVal(['Estimator', 'Owner']) || '',
+                            'Delivery Date': deliveryDate, // Now handles DD/MM/YYYY or returns null
                             'Expiration Date': expirationDate,
                             'Awarded Date': awardedDate,
                             JSON_Data: JSON.stringify(row)
                         });
                         successCount++;
                     } catch (err: any) { 
-                         console.error(`Failed row ${i+1}:`, err); 
                          failCount++; 
                          setRowErrors(prev => [...prev, { row: i + 2, message: err.message }]);
                     }
-                    if (i % 5 === 0) {
-                        setStatusMsg(`Uploading project ${i + 1} of ${total}...`);
-                        await new Promise(resolve => setTimeout(resolve, 100)); 
-                    }
+                    if (i % 5 === 0) { setStatusMsg(`Uploading project ${i + 1} of ${jsonData.length}...`); await new Promise(resolve => setTimeout(resolve, 100)); }
                 }
-                setStatusMsg(`Finished. Success: ${successCount}, Fail: ${failCount}`);
-                setIsLoading(false);
-                alert(`Upload finished! Success: ${successCount}, Failed: ${failCount}`);
-            } catch (err: any) { setError("Excel processing failed: " + err.message); setIsLoading(false); if (e.target) e.target.value = ''; }
+                setStatusMsg(`Finished. Success: ${successCount}, Fail: ${failCount}`); setIsLoading(false); alert(`Uploaded ${successCount} projects.`);
+            } catch (err: any) { setError(err.message); setIsLoading(false); if (e.target) e.target.value = ''; }
         };
         reader.readAsArrayBuffer(file);
     };
@@ -294,7 +238,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                 <div className="space-y-6">
                     <div className="bg-slate-900 text-white p-4 rounded-xl flex justify-between items-center"><div><p className="text-xs text-slate-400 uppercase">Connected To</p><p className="font-bold">{selectedSite.displayName}</p></div><button onClick={() => setStep(0)} className="text-xs text-blue-400 hover:text-white">Change Site</button></div>
                     
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><h3 className="font-bold text-slate-800 mb-4">1. Provision Lists</h3><p className="text-sm text-slate-500 mb-4">Ensure the required SharePoint lists exist.</p>{error && <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600"><strong>Error:</strong> {error} <div className="mt-2 flex gap-2"><button onClick={() => handleInitialize(true)} className="text-xs bg-white border border-red-200 px-2 py-1 rounded font-bold">Retry</button><button onClick={handleLogout} className="text-xs bg-red-600 text-white px-2 py-1 rounded font-bold">Log Out</button></div></div>}<button onClick={() => handleInitialize(true)} disabled={isLoading} className="bg-orange-600 text-white px-6 py-2 rounded-lg font-bold text-sm hover:bg-orange-700 disabled:opacity-50 shadow-sm">{isLoading ? "Processing..." : "Initialize Database"}</button>{statusMsg && <p className="mt-2 text-sm text-slate-600">{statusMsg}</p>}</div>
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><h3 className="font-bold text-slate-800 mb-4">1. Provision Lists (Auto-Repair)</h3><p className="text-sm text-slate-500 mb-4">Click this if columns are missing or sync fails.</p>{error && <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600"><strong>Error:</strong> {error} <div className="mt-2 flex gap-2"><button onClick={() => handleInitialize(true)} className="text-xs bg-white border border-red-200 px-2 py-1 rounded font-bold">Retry</button><button onClick={handleLogout} className="text-xs bg-red-600 text-white px-2 py-1 rounded font-bold">Log Out</button></div></div>}<button onClick={() => handleInitialize(true)} disabled={isLoading} className="bg-orange-600 text-white px-6 py-2 rounded-lg font-bold text-sm hover:bg-orange-700 disabled:opacity-50 shadow-sm">{isLoading ? "Processing..." : "Initialize / Repair Database"}</button>{statusMsg && <p className="mt-2 text-sm text-slate-600">{statusMsg}</p>}</div>
                     
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><h3 className="font-bold text-slate-800 mb-4">2. Purchase History (Price Analysis)</h3><p className="text-sm text-slate-500 mb-4">Manage 'Carsan_Purchases' list.</p><div className="grid md:grid-cols-2 gap-4"><div className="border border-slate-200 rounded-lg p-4"><div className="flex items-center gap-2 mb-2 font-bold text-blue-700"><Upload className="w-4 h-4"/> Push (Upload)</div><div className="relative"><input type="file" onChange={handlePurchaseHistoryUpload} accept=".xlsx,.xls,.csv" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" disabled={isLoading} /><button className="w-full bg-blue-50 text-blue-700 border border-blue-200 py-2 rounded-lg text-sm font-bold hover:bg-blue-100">Import Excel</button></div></div><div className="border border-slate-200 rounded-lg p-4"><div className="flex items-center gap-2 mb-2 font-bold text-indigo-700"><RefreshCw className="w-4 h-4"/> Pull (Download)</div><button onClick={handlePurchaseSyncDown} disabled={isLoading || !setPurchases} className="w-full bg-indigo-600 text-white py-2 rounded-lg text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2">Sync Down from Cloud</button></div></div></div>
                     
