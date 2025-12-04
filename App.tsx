@@ -1,4 +1,3 @@
-// v5.2 App Update - Auto Load Purchases
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Login } from './components/Login';
@@ -10,11 +9,13 @@ import { ServiceModule } from './components/ServiceModule';
 import { PriceAnalysis } from './components/PriceAnalysis';
 import { AIAssistant } from './components/AIAssistant';
 import { SharePointConnect } from './components/SharePointConnect';
-import { ViewState, User, ProjectEstimate, MaterialItem, ServiceTicket, Lead, PurchaseRecord } from './types';
+import { ViewState, User, ProjectEstimate, MaterialItem, ServiceTicket, Lead, PurchaseRecord, AuditLog } from './types';
 import { getAllPurchaseRecords } from './services/sharepointService';
 
+// Configuration constant
 const RESET_APP = false;
 
+// Generic Helper to load from LocalStorage
 const loadState = <T,>(key: string, fallback: T): T => {
     if (RESET_APP) return fallback;
     const saved = localStorage.getItem(key);
@@ -31,39 +32,58 @@ const loadState = <T,>(key: string, fallback: T): T => {
 
 export const App: React.FC = () => {
     useEffect(() => {
-        console.log("Carsan Electric App v5.4 - Manual Entry Fix");
+        console.log("Carsan Electric App v6.0 - Dashboard Restore");
     }, []);
 
     const [user, setUser] = useState<User | null>(null);
     const [currentView, setCurrentView] = useState<ViewState>(ViewState.DASHBOARD);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
+    // Application Data State
     const [projects, setProjects] = useState<ProjectEstimate[]>(() => loadState('carsan_projects', []));
     const [materials, setMaterials] = useState<MaterialItem[]>(() => loadState('carsan_materials', []));
     const [tickets, setTickets] = useState<ServiceTicket[]>(() => loadState('carsan_tickets', []));
     const [purchases, setPurchases] = useState<PurchaseRecord[]>(() => loadState('carsan_purchases', []));
     const [leads, setLeads] = useState<Lead[]>(() => loadState('carsan_leads', []));
     const [opportunities, setOpportunities] = useState<any[]>(() => loadState('carsan_opportunities', []));
+    const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => loadState('carsan_audit_logs', []));
 
+    // Persist Data
     useEffect(() => localStorage.setItem('carsan_projects', JSON.stringify(projects)), [projects]);
     useEffect(() => localStorage.setItem('carsan_materials', JSON.stringify(materials)), [materials]);
     useEffect(() => localStorage.setItem('carsan_tickets', JSON.stringify(tickets)), [tickets]);
     useEffect(() => localStorage.setItem('carsan_purchases', JSON.stringify(purchases)), [purchases]);
     useEffect(() => localStorage.setItem('carsan_leads', JSON.stringify(leads)), [leads]);
     useEffect(() => localStorage.setItem('carsan_opportunities', JSON.stringify(opportunities)), [opportunities]);
+    useEffect(() => localStorage.setItem('carsan_audit_logs', JSON.stringify(auditLogs)), [auditLogs]);
+
+    // Audit Logging Helper
+    const logActivity = (action: string, details: string) => {
+        if (!user) return;
+        const log: AuditLog = {
+            id: Date.now().toString(),
+            userId: user.id,
+            userName: user.name,
+            action,
+            details,
+            timestamp: new Date().toISOString()
+        };
+        setAuditLogs(prev => [log, ...prev].slice(0, 100)); // Keep last 100
+    };
 
     // Auto-load purchases from SharePoint if connected
     useEffect(() => {
-         // In a real app, we'd have the Site ID persisted. 
-         // For now, we just leave this placeholder for the connection
+         // Placeholder: In a real app, check for saved Site ID and auto-fetch
     }, []);
 
     const handleLogin = (u: User) => {
         setUser(u);
         localStorage.setItem('carsan_user', JSON.stringify(u));
+        logActivity('Login', 'User logged in');
     };
 
     const handleLogout = () => {
+        logActivity('Logout', 'User logged out');
         import('./services/emailIntegration').then(m => m.signOut());
         setUser(null);
         localStorage.removeItem('carsan_user');
@@ -79,7 +99,8 @@ export const App: React.FC = () => {
                 return (
                     <div className="p-4 md:p-8 max-w-7xl mx-auto">
                         <h1 className="text-3xl font-bold mb-6 text-slate-900">Command Center</h1>
-                        {/* Same Dashboard Content as v4 - Preserved for brevity */}
+                        
+                        {/* 1. Revenue Overview */}
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                                 <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Revenue Won (YTD)</h3>
@@ -110,12 +131,95 @@ export const App: React.FC = () => {
                                 </p>
                             </div>
                         </div>
-                         <div className="bg-slate-900 text-white p-6 rounded-xl shadow-lg mb-8">
-                            <h3 className="font-bold text-lg mb-2">Quick Actions</h3>
-                            <div className="flex gap-4">
-                                <button onClick={() => setCurrentView(ViewState.ESTIMATE_NEW)} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">+ New Estimate</button>
-                                <button onClick={() => setCurrentView(ViewState.SERVICE)} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">+ New Change Order</button>
-                                <button onClick={() => setCurrentView(ViewState.CRM)} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">+ Add Lead</button>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                            
+                            {/* 2. Action Items (Follow Ups) */}
+                            <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                                <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse"></span> Projects Due for Follow-Up
+                                </h3>
+                                <div className="space-y-3">
+                                    {projects
+                                        .filter(p => p.followUpDate && new Date(p.followUpDate) <= new Date() && !['Won', 'Lost', 'Completed'].includes(p.status))
+                                        .map(p => (
+                                            <div key={p.id} className="flex justify-between items-center p-3 bg-orange-50 rounded-lg border border-orange-100 hover:bg-orange-100 transition cursor-pointer" onClick={() => { setCurrentView(ViewState.PROJECTS); }}>
+                                                <div>
+                                                    <p className="font-bold text-slate-800 text-sm">{p.name}</p>
+                                                    <p className="text-xs text-orange-700">Due: {new Date(p.followUpDate!).toLocaleDateString()} • {p.client}</p>
+                                                </div>
+                                                <button className="text-xs bg-white border border-orange-200 text-orange-700 px-3 py-1.5 rounded font-bold hover:shadow-sm">
+                                                    Open
+                                                </button>
+                                            </div>
+                                        ))}
+                                    {projects.filter(p => p.followUpDate && new Date(p.followUpDate) <= new Date() && !['Won', 'Lost', 'Completed'].includes(p.status)).length === 0 && (
+                                        <div className="p-8 text-center text-slate-400 italic bg-slate-50 rounded-lg border border-dashed border-slate-200">
+                                            No pending follow-ups today. Great job!
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* 3. Operational Snapshot */}
+                            <div className="space-y-6">
+                                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                                    <h3 className="font-bold text-slate-800 mb-4">Operations</h3>
+                                    <div className="space-y-4">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-sm text-slate-600">Active Projects (Ongoing)</span>
+                                            <span className="font-bold text-slate-900 bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs">
+                                                {projects.filter(p => p.status === 'Ongoing').length}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-sm text-slate-600">Pending Change Orders</span>
+                                            <span className="font-bold text-slate-900 bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs">
+                                                {tickets.filter(t => t.status === 'Sent').length}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-sm text-slate-600">Open Leads</span>
+                                            <span className="font-bold text-slate-900 bg-slate-100 text-slate-800 px-2 py-0.5 rounded text-xs">
+                                                {leads.length}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-slate-900 text-white p-6 rounded-xl shadow-lg">
+                                    <h3 className="font-bold text-lg mb-2">Quick Actions</h3>
+                                    <div className="space-y-2">
+                                        <button onClick={() => setCurrentView(ViewState.ESTIMATE_NEW)} className="w-full text-left px-3 py-2 hover:bg-white/10 rounded-lg text-sm transition">
+                                            + New Estimate
+                                        </button>
+                                        <button onClick={() => setCurrentView(ViewState.SERVICE)} className="w-full text-left px-3 py-2 hover:bg-white/10 rounded-lg text-sm transition">
+                                            + New Change Order
+                                        </button>
+                                        <button onClick={() => setCurrentView(ViewState.CRM)} className="w-full text-left px-3 py-2 hover:bg-white/10 rounded-lg text-sm transition">
+                                            + Add CRM Lead
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* 4. Activity Log (Admin Only) */}
+                                {user.role === 'admin' && (
+                                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                                        <h3 className="font-bold text-slate-800 mb-2 text-sm">Recent Activity</h3>
+                                        <div className="space-y-2 max-h-40 overflow-y-auto text-xs text-slate-500 custom-scrollbar">
+                                            {auditLogs.length === 0 ? (
+                                                <p className="italic">No activity recorded.</p>
+                                            ) : (
+                                                auditLogs.slice(0, 5).map(log => (
+                                                    <div key={log.id} className="border-b border-slate-50 pb-1 mb-1 last:border-0">
+                                                        <span className="font-bold text-slate-700">{log.userName}</span>: {log.details}
+                                                        <br/><span className="text-[10px] text-slate-300">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
