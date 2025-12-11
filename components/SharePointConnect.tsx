@@ -109,6 +109,23 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         return null; // Return null if invalid, so SharePoint ignores it rather than crashing
     };
 
+    // Helper to find keys with loose matching (ignores case, extra spaces, underscores)
+    const findValWithFuzzyMatch = (row: any, keys: string[]) => {
+        const rowKeys = Object.keys(row);
+        const normalize = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, '').trim();
+
+        for (const key of keys) {
+            // 1. Exact match (fastest)
+            if (row[key] !== undefined) return row[key];
+
+            // 2. Fuzzy match
+            const searchKey = normalize(key);
+            const foundKey = rowKeys.find(k => normalize(k) === searchKey);
+            if (foundKey && row[foundKey] !== undefined) return row[foundKey];
+        }
+        return undefined;
+    };
+
     const handlePurchaseHistoryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]; if (!file || !selectedSite) return;
         setIsLoading(true); setRowErrors([]); setStatusMsg("Reading Excel...");
@@ -125,32 +142,24 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                 setStatusMsg(`Uploading ${jsonData.length} records...`);
                 let successCount = 0; let failCount = 0;
 
-                const findVal = (row: any, keys: string[]) => {
-                    const rowKeys = Object.keys(row);
-                    for (const key of keys) {
-                        if (row[key] !== undefined) return row[key];
-                        const foundKey = rowKeys.find(k => k.toLowerCase().trim() === key.toLowerCase().trim());
-                        if (foundKey && row[foundKey] !== undefined) return row[foundKey];
-                    }
-                    return undefined;
-                };
-
                 for (let i = 0; i < jsonData.length; i++) {
                     const row: any = jsonData[i];
                     try {
+                        const findVal = (keys: string[]) => findValWithFuzzyMatch(row, keys);
+
                         await addListItem(selectedSite.id, purchaseList.id, {
-                            Title: `PO-${findVal(row, ['PO Number', 'PO']) || i}`,
-                            PurchaseDate: parseExcelDate(findVal(row, ['Date', 'Invoice Date'])),
-                            PO_Number: String(findVal(row, ['PO Number', 'PO']) || ''),
-                            Brand: String(findVal(row, ['Brand']) || ''),
-                            Item_Description: String(findVal(row, ['Item', 'Item Description']) || ''),
-                            Quantity: Number(findVal(row, ['Quantity', 'Qty']) || 0),
-                            Unit_Cost: parseCurrency(String(findVal(row, ['Unit Cost', 'Price']) || 0)),
-                            Tax: parseCurrency(String(findVal(row, ['TAX', 'Tax']) || 0)),
-                            Total_Cost: parseCurrency(String(findVal(row, ['Total', 'Total Cost']) || 0)),
-                            Supplier: normalizeSupplier(String(findVal(row, ['Supplier']) || '')),
-                            Project_Name: String(findVal(row, ['Project']) || ''),
-                            Item_Type: String(findVal(row, ['TYPE']) || ''),
+                            Title: `PO-${findVal(['PO Number', 'PO']) || i}`,
+                            PurchaseDate: parseExcelDate(findVal(['Date', 'Invoice Date'])),
+                            PO_Number: String(findVal(['PO Number', 'PO']) || ''),
+                            Brand: String(findVal(['Brand']) || ''),
+                            Item_Description: String(findVal(['Item', 'Item Description']) || ''),
+                            Quantity: Number(findVal(['Quantity', 'Qty']) || 0),
+                            Unit_Cost: parseCurrency(String(findVal(['Unit Cost', 'Price']) || 0)),
+                            Tax: parseCurrency(String(findVal(['TAX', 'Tax']) || 0)),
+                            Total_Cost: parseCurrency(String(findVal(['Total', 'Total Cost']) || 0)),
+                            Supplier: normalizeSupplier(String(findVal(['Supplier']) || '')),
+                            Project_Name: String(findVal(['Project']) || ''),
+                            Item_Type: String(findVal(['TYPE']) || ''),
                             JSON_Data: JSON.stringify(row)
                         });
                         successCount++;
@@ -181,14 +190,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
 
                 for (let i = 0; i < jsonData.length; i++) {
                     const row: any = jsonData[i];
-                    const findVal = (keys: string[]) => {
-                        const rowKeys = Object.keys(row);
-                        for (const key of keys) {
-                            const foundKey = rowKeys.find(k => k.toLowerCase().trim() === key.toLowerCase().trim());
-                            if (foundKey && row[foundKey] !== undefined) return row[foundKey];
-                        }
-                        return undefined;
-                    };
+                    const findVal = (keys: string[]) => findValWithFuzzyMatch(row, keys);
 
                     try {
                         // Use the strict date parser

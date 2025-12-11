@@ -35,9 +35,30 @@
     <script type="module" src="/index.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js');
-        });
+        const registerSW = () => {
+          // Use relative path resolution against window.location.href to ensure correct origin and path
+          // regardless of iframe or subpath deployment.
+          try {
+            const swUrl = new URL('./sw.js', window.location.href).href;
+            navigator.serviceWorker.register(swUrl)
+              .then(registration => {
+                console.log('ServiceWorker registration successful');
+              })
+              .catch(err => {
+                // Gracefully handle registration errors without breaking the app
+                console.log('ServiceWorker registration skipped: ', err.message);
+              });
+          } catch (e) {
+            console.error('ServiceWorker setup failed', e);
+          }
+        };
+
+        // Check if load has already happened to avoid "invalid state" or missed events
+        if (document.readyState === 'complete') {
+          registerSW();
+        } else {
+          window.addEventListener('load', registerSW);
+        }
       }
     </script>
   </body>
