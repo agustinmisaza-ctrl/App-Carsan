@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Lead, ProjectEstimate } from '../types';
 import { fetchOutlookEmails, sendOutlookEmail, getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId } from '../services/emailIntegration';
-import { Mail, RefreshCw, Settings, User as UserIcon, Phone, Search, Save, Loader2, Trello, List, ArrowRight, CheckCircle, XCircle, DollarSign, Plus, ArrowUpRight, ArrowDownRight, Trophy, AlertCircle, Trash2, Send, ExternalLink } from 'lucide-react';
+import { Mail, RefreshCw, Settings, User as UserIcon, Phone, Search, Save, Loader2, Trello, List, ArrowRight, CheckCircle, XCircle, DollarSign, Plus, ArrowUpRight, ArrowDownRight, Trophy, AlertCircle, Trash2, Send, ExternalLink, Users, Calendar, Clock, FileText, CheckSquare, MessageSquare } from 'lucide-react';
 
 interface CRMProps {
     leads: Lead[];
@@ -13,7 +13,7 @@ interface CRMProps {
 }
 
 export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpportunities, projects = [], setProjects }) => {
-    const [activeTab, setActiveTab] = useState<'pipeline' | 'leads' | 'email'>('pipeline');
+    const [activeTab, setActiveTab] = useState<'pipeline' | 'leads' | 'followup' | 'email'>('pipeline');
     const [isLoading, setIsLoading] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     
@@ -26,6 +26,9 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
     const [emailSubject, setEmailSubject] = useState('');
     const [emailBody, setEmailBody] = useState('');
     const [isSending, setIsSending] = useState(false);
+
+    // Follow Up View State
+    const [selectedClientName, setSelectedClientName] = useState<string | null>(null);
 
     // Financial KPIs
     const currentYear = new Date().getFullYear();
@@ -48,6 +51,69 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
     const calcGrowth = (current: number, past: number) => {
         if (past === 0) return 100;
         return ((current - past) / past) * 100;
+    };
+
+    // --- AGGREGATE CLIENT DATA FOR FOLLOW UP TAB ---
+    const clientGroups = useMemo(() => {
+        const groups: Record<string, {
+            name: string;
+            email: string;
+            projects: ProjectEstimate[];
+            totalValue: number;
+            sentCount: number;
+            lastContact: string | null;
+            hasUrgent: boolean;
+        }> = {};
+
+        projects.forEach(p => {
+            const name = p.client || 'Unknown Client';
+            if (!groups[name]) {
+                groups[name] = { 
+                    name, 
+                    email: p.contactInfo || '', 
+                    projects: [], 
+                    totalValue: 0, 
+                    sentCount: 0,
+                    lastContact: null,
+                    hasUrgent: false
+                };
+            }
+            groups[name].projects.push(p);
+            groups[name].totalValue += (p.contractValue || 0);
+            if (p.status === 'Sent') groups[name].sentCount++;
+            
+            // Check urgency
+            if (p.status === 'Sent' && p.followUpDate) {
+                const today = new Date();
+                const followUp = new Date(p.followUpDate);
+                if (today >= followUp) groups[name].hasUrgent = true;
+            }
+        });
+
+        return Object.values(groups).sort((a, b) => {
+            if (a.hasUrgent && !b.hasUrgent) return -1;
+            if (!a.hasUrgent && b.hasUrgent) return 1;
+            return b.sentCount - a.sentCount; // Prioritize clients with active sent estimates
+        });
+    }, [projects]);
+
+    const selectedClientData = selectedClientName ? clientGroups.find(c => c.name === selectedClientName) : null;
+
+    const generateDraft = (clientData: typeof selectedClientData) => {
+        if (!clientData) return;
+        
+        const sentProjects = clientData.projects.filter(p => p.status === 'Sent');
+        if (sentProjects.length === 0) {
+            setEmailSubject(`Checking in - ${clientData.name}`);
+            setEmailBody(`Hi ${clientData.name.split(' ')[0]},\n\nI wanted to touch base regarding our recent projects. Do you have any new requirements?\n\nBest,\nCarsan Electric`);
+        } else {
+            const projectList = sentProjects.map(p => `- ${p.name} ($${(p.contractValue || 0).toLocaleString()})`).join('\n');
+            setEmailSubject(`Follow Up: Outstanding Estimates for ${clientData.name}`);
+            setEmailBody(`Hi ${clientData.name.split(' ')[0]},\n\nI hope you are having a great week.\n\nI am writing to follow up on the estimates we sent over recently:\n\n${projectList}\n\nDo you have any questions or need any adjustments to proceed?\n\nBest regards,\nCarsan Electric`);
+        }
+        
+        setEmailTo(clientData.email);
+        setActiveTab('email'); // Switch to email tab to finalize
     };
 
     const handleFetchLeads = async () => {
@@ -117,6 +183,12 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
         setActiveTab('pipeline');
     };
 
+    const updateProjectStatus = (id: string, status: ProjectEstimate['status']) => {
+        if (!setProjects) return;
+        const updated = projects.map(p => p.id === id ? { ...p, status } : p);
+        setProjects(updated);
+    };
+
     const moveStage = (projectId: string, direction: 'next' | 'prev') => {
         if (!setProjects) return;
         const stages = ['Draft', 'Sent', 'Won', 'Lost'];
@@ -180,22 +252,28 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                     >
                         <Settings className="w-5 h-5" />
                     </button>
-                    <div className="bg-slate-100 p-1 rounded-lg flex">
+                    <div className="bg-slate-100 p-1 rounded-lg flex overflow-x-auto max-w-[calc(100vw-100px)]">
                         <button 
                             onClick={() => setActiveTab('pipeline')}
-                            className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'pipeline' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                            className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'pipeline' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
                         >
                             <Trello className="w-4 h-4" /> Pipeline
                         </button>
                         <button 
                             onClick={() => setActiveTab('leads')}
-                            className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'leads' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                            className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'leads' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
                         >
                             <List className="w-4 h-4" /> Leads
                         </button>
+                         <button 
+                            onClick={() => setActiveTab('followup')}
+                            className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'followup' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                            <Users className="w-4 h-4" /> Follow Up
+                        </button>
                         <button 
                             onClick={() => setActiveTab('email')}
-                            className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'email' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                            className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'email' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
                         >
                             <Mail className="w-4 h-4" /> Email
                         </button>
@@ -421,6 +499,124 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                 ))}
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            )}
+
+            {/* --- FOLLOW UP (CLIENT DASHBOARD) VIEW --- */}
+            {activeTab === 'followup' && (
+                <div className="flex-1 flex flex-col md:flex-row gap-6 h-full overflow-hidden">
+                    {/* LEFT: Client List */}
+                    <div className="w-full md:w-1/3 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
+                        <div className="p-4 border-b border-slate-100 bg-slate-50">
+                            <h3 className="font-bold text-slate-800 text-sm">Active Clients</h3>
+                            <p className="text-xs text-slate-500">Prioritized by urgency</p>
+                        </div>
+                        <div className="flex-1 overflow-y-auto custom-scrollbar">
+                            {clientGroups.map((client, idx) => (
+                                <div 
+                                    key={idx} 
+                                    onClick={() => setSelectedClientName(client.name)}
+                                    className={`p-4 border-b border-slate-50 cursor-pointer hover:bg-slate-50 transition ${selectedClientName === client.name ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''}`}
+                                >
+                                    <div className="flex justify-between items-start mb-1">
+                                        <span className="font-bold text-slate-800 text-sm">{client.name}</span>
+                                        {client.hasUrgent && <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" title="Follow Up Due"></span>}
+                                    </div>
+                                    <div className="flex justify-between items-center text-xs text-slate-500">
+                                        <span>{client.sentCount} Active Estimates</span>
+                                        <span className="font-medium">${client.totalValue.toLocaleString()}</span>
+                                    </div>
+                                </div>
+                            ))}
+                            {clientGroups.length === 0 && <p className="text-center p-6 text-slate-400 text-sm">No active clients found.</p>}
+                        </div>
+                    </div>
+
+                    {/* RIGHT: Client Details & Projects */}
+                    <div className="w-full md:w-2/3 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
+                        {selectedClientData ? (
+                            <div className="flex flex-col h-full">
+                                {/* Header */}
+                                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                                    <div>
+                                        <h2 className="text-xl font-bold text-slate-900">{selectedClientData.name}</h2>
+                                        <div className="flex items-center gap-4 mt-1 text-sm text-slate-500">
+                                            <span className="flex items-center gap-1"><Mail className="w-3 h-3"/> {selectedClientData.email}</span>
+                                            <span className="flex items-center gap-1"><DollarSign className="w-3 h-3"/> Total Pipeline: ${selectedClientData.totalValue.toLocaleString()}</span>
+                                        </div>
+                                    </div>
+                                    <button 
+                                        onClick={() => generateDraft(selectedClientData)}
+                                        className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 flex items-center gap-2 shadow-sm"
+                                    >
+                                        <MessageSquare className="w-4 h-4" /> Draft Follow-up
+                                    </button>
+                                </div>
+
+                                {/* Project List */}
+                                <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                                    <h3 className="font-bold text-slate-800 text-sm uppercase flex items-center gap-2">
+                                        <FileText className="w-4 h-4 text-slate-500" /> Client Projects
+                                    </h3>
+                                    
+                                    {selectedClientData.projects.length === 0 ? (
+                                        <p className="text-slate-400 text-sm italic">No projects found for this client.</p>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {selectedClientData.projects.sort((a,b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime()).map(project => (
+                                                <div key={project.id} className="border border-slate-200 rounded-xl p-4 hover:shadow-md transition bg-white group">
+                                                    <div className="flex justify-between items-start mb-2">
+                                                        <div>
+                                                            <h4 className="font-bold text-slate-900">{project.name}</h4>
+                                                            <p className="text-xs text-slate-500">{project.address}</p>
+                                                        </div>
+                                                        <span className={`text-xs px-2 py-1 rounded-full font-bold ${
+                                                            project.status === 'Sent' ? 'bg-blue-100 text-blue-700' :
+                                                            project.status === 'Won' ? 'bg-emerald-100 text-emerald-700' :
+                                                            project.status === 'Lost' ? 'bg-red-100 text-red-700' :
+                                                            'bg-slate-100 text-slate-600'
+                                                        }`}>
+                                                            {project.status}
+                                                        </span>
+                                                    </div>
+                                                    
+                                                    <div className="flex items-center gap-4 text-sm text-slate-600 mt-3 border-t border-slate-50 pt-3">
+                                                        <span className="flex items-center gap-1 font-bold"><DollarSign className="w-3 h-3 text-slate-400"/> {(project.contractValue || 0).toLocaleString()}</span>
+                                                        <span className="flex items-center gap-1"><Calendar className="w-3 h-3 text-slate-400"/> Sent: {new Date(project.dateCreated).toLocaleDateString()}</span>
+                                                        {project.followUpDate && (
+                                                            <span className={`flex items-center gap-1 ${new Date() > new Date(project.followUpDate) && project.status === 'Sent' ? 'text-orange-600 font-bold' : ''}`}>
+                                                                <Clock className="w-3 h-3"/> Follow Up: {new Date(project.followUpDate).toLocaleDateString()}
+                                                            </span>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Quick Actions */}
+                                                    {project.status === 'Sent' && (
+                                                        <div className="mt-4 flex gap-2">
+                                                            <button onClick={() => updateProjectStatus(project.id, 'Won')} className="flex-1 bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-100 py-1.5 rounded text-xs font-bold flex items-center justify-center gap-1 transition">
+                                                                <CheckSquare className="w-3 h-3" /> Mark Won
+                                                            </button>
+                                                            <button onClick={() => updateProjectStatus(project.id, 'Lost')} className="flex-1 bg-red-50 text-red-700 border border-red-100 hover:bg-red-100 py-1.5 rounded text-xs font-bold flex items-center justify-center gap-1 transition">
+                                                                <XCircle className="w-3 h-3" /> Mark Lost
+                                                            </button>
+                                                            <button onClick={() => generateDraft({ ...selectedClientData, projects: [project] })} className="flex-1 bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 py-1.5 rounded text-xs font-bold flex items-center justify-center gap-1 transition">
+                                                                <Mail className="w-3 h-3" /> Email
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                                <Users className="w-16 h-16 mb-4 opacity-20" />
+                                <p>Select a client to view details</p>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
