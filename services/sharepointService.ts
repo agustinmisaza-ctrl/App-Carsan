@@ -4,7 +4,7 @@ import { PurchaseRecord, ProjectEstimate } from "../types";
 export interface SPSite { id: string; displayName: string; webUrl: string; }
 export interface SPList { id: string; displayName: string; }
 export interface SPColumn { name: string; displayName: string; }
-export interface SPItem { id: string; fields: any; }
+export interface SPItem { id: string; fields: any; createdDateTime?: string; }
 
 const SCOPES = ["Sites.ReadWrite.All", "Sites.Manage.All"];
 
@@ -68,7 +68,7 @@ export const getAllPurchaseRecords = async (siteId: string): Promise<PurchaseRec
             return {
                 ...base,
                 id: item.id,
-                date: f.PurchaseDate || f.Created,
+                date: f.PurchaseDate || item.createdDateTime || f.Created,
                 poNumber: f.PO_Number,
                 brand: f.Brand,
                 itemDescription: f.Item_Description,
@@ -107,6 +107,8 @@ export const getAllProjects = async (siteId: string): Promise<ProjectEstimate[]>
                 deliveryDate: f['Delivery Date'],
                 expirationDate: f['Expiration Date'],
                 awardedDate: f['Awarded Date'],
+                // Crucial fix: Use SharePoint creation date if no explicit date provided
+                dateCreated: (base as any).dateCreated || item.createdDateTime || new Date().toISOString()
             } as ProjectEstimate;
         });
     } catch(e) { console.error("Error fetching projects", e); return []; }

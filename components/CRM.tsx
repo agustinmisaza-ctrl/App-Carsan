@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Lead, ProjectEstimate } from '../types';
-import { fetchOutlookEmails, getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId } from '../services/emailIntegration';
-import { Mail, RefreshCw, Settings, User as UserIcon, Phone, Search, Save, Loader2, Trello, List, ArrowRight, CheckCircle, XCircle, DollarSign, Plus, ArrowUpRight, ArrowDownRight, Trophy, AlertCircle, Trash2 } from 'lucide-react';
+import { fetchOutlookEmails, sendOutlookEmail, getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId } from '../services/emailIntegration';
+import { Mail, RefreshCw, Settings, User as UserIcon, Phone, Search, Save, Loader2, Trello, List, ArrowRight, CheckCircle, XCircle, DollarSign, Plus, ArrowUpRight, ArrowDownRight, Trophy, AlertCircle, Trash2, Send, ExternalLink } from 'lucide-react';
 
 interface CRMProps {
     leads: Lead[];
@@ -13,13 +13,19 @@ interface CRMProps {
 }
 
 export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpportunities, projects = [], setProjects }) => {
-    const [activeTab, setActiveTab] = useState<'pipeline' | 'leads'>('pipeline');
+    const [activeTab, setActiveTab] = useState<'pipeline' | 'leads' | 'email'>('pipeline');
     const [isLoading, setIsLoading] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     
     // Settings State
     const [tenantId, setTenantId] = useState(getStoredTenantId() || '');
     const [clientId, setClientId] = useState(getStoredClientId() || '');
+
+    // Email State
+    const [emailTo, setEmailTo] = useState('');
+    const [emailSubject, setEmailSubject] = useState('');
+    const [emailBody, setEmailBody] = useState('');
+    const [isSending, setIsSending] = useState(false);
 
     // Financial KPIs
     const currentYear = new Date().getFullYear();
@@ -70,6 +76,28 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
         alert("Settings saved!");
     };
 
+    const handleSendEmail = async () => {
+        if (!emailTo || !emailSubject || !emailBody) {
+            alert("Please fill in all fields.");
+            return;
+        }
+        setIsSending(true);
+        try {
+            await sendOutlookEmail(emailTo, emailSubject, emailBody);
+            alert("Email sent successfully!");
+            setEmailTo('');
+            setEmailSubject('');
+            setEmailBody('');
+        } catch (e: any) {
+            console.error(e);
+            if (confirm(`Failed to send via Outlook: ${e.message}\n\nOpen default mail app instead?`)) {
+                 window.open(`mailto:${emailTo}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`);
+            }
+        } finally {
+            setIsSending(false);
+        }
+    };
+
     const convertToOpportunity = (lead: Lead) => {
         if (!setProjects) return;
         const newProject: ProjectEstimate = {
@@ -89,7 +117,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
         setActiveTab('pipeline');
     };
 
-    // Updated moveStage to handle Project Statuses: Draft -> Sent -> Won
     const moveStage = (projectId: string, direction: 'next' | 'prev') => {
         if (!setProjects) return;
         const stages = ['Draft', 'Sent', 'Won', 'Lost'];
@@ -99,9 +126,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                 let newIdx = idx;
                 if (direction === 'next' && idx < stages.length - 1) newIdx++;
                 if (direction === 'prev' && idx > 0) newIdx--;
-                // Prevent accidental move from Won to Lost via arrow if index logic causes it.
-                // Draft(0) -> Sent(1) -> Won(2) -> Lost(3).
-                // Actually this flow is fine, user can choose.
                 return { ...p, status: stages[newIdx] as any };
             }
             return p;
@@ -135,6 +159,12 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
         window.open(`mailto:simon.martinez@carsanelectric.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
     };
 
+    // Prepare client list for Email tab
+    const allClients = Array.from(new Set([
+        ...projects.map(p => ({ name: p.client, email: p.contactInfo })),
+        ...leads.map(l => ({ name: l.name, email: l.email }))
+    ])).filter(c => c.name && c.email);
+
     return (
         <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6 h-full flex flex-col">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 shrink-0">
@@ -162,6 +192,12 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                             className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'leads' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
                         >
                             <List className="w-4 h-4" /> Leads
+                        </button>
+                        <button 
+                            onClick={() => setActiveTab('email')}
+                            className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'email' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                            <Mail className="w-4 h-4" /> Email
                         </button>
                     </div>
                 </div>
@@ -238,7 +274,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                 <div className="flex-1 overflow-x-auto min-h-[500px] pb-4">
                     <div className="flex gap-4 min-w-[1000px] h-full">
                         {['Draft', 'Sent', 'Won', 'Lost'].map(stage => {
-                            // Filter by project status and sort by Date Created (Newest First)
                             const stageOpps = projects
                                 .filter(p => p.status === stage)
                                 .sort((a, b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime());
@@ -386,6 +421,83 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                 ))}
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            )}
+
+            {/* --- EMAIL DASHBOARD VIEW --- */}
+            {activeTab === 'email' && (
+                <div className="flex-1 flex flex-col md:flex-row gap-6 h-full overflow-hidden">
+                    <div className="w-full md:w-1/3 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col">
+                        <div className="p-4 border-b border-slate-100 font-bold text-slate-800">Recipients</div>
+                        <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+                            {allClients.map((c, i) => (
+                                <div 
+                                    key={i} 
+                                    onClick={() => setEmailTo(c.email!)}
+                                    className={`p-3 rounded-lg border cursor-pointer hover:bg-blue-50 transition ${emailTo === c.email ? 'bg-blue-50 border-blue-200' : 'border-slate-100'}`}
+                                >
+                                    <div className="font-bold text-sm text-slate-800">{c.name}</div>
+                                    <div className="text-xs text-slate-500 truncate">{c.email}</div>
+                                </div>
+                            ))}
+                            {allClients.length === 0 && <p className="text-center text-slate-400 text-sm py-8">No clients found.</p>}
+                        </div>
+                    </div>
+                    <div className="w-full md:w-2/3 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col p-6">
+                        <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                             <Mail className="w-5 h-5 text-blue-600" /> Compose Email
+                        </h3>
+                        <div className="space-y-4 flex-1 flex flex-col">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">To</label>
+                                <input 
+                                    value={emailTo} 
+                                    onChange={(e) => setEmailTo(e.target.value)} 
+                                    className="w-full border border-slate-200 rounded-lg p-2 text-sm" 
+                                    placeholder="recipient@example.com"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Subject</label>
+                                <input 
+                                    value={emailSubject} 
+                                    onChange={(e) => setEmailSubject(e.target.value)} 
+                                    className="w-full border border-slate-200 rounded-lg p-2 text-sm" 
+                                    placeholder="Project Update..."
+                                />
+                            </div>
+                            <div className="flex-1 flex flex-col">
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Message</label>
+                                <textarea 
+                                    value={emailBody} 
+                                    onChange={(e) => setEmailBody(e.target.value)} 
+                                    className="w-full border border-slate-200 rounded-lg p-3 text-sm flex-1 resize-none focus:ring-2 focus:ring-blue-500 outline-none" 
+                                    placeholder="Type your message here..."
+                                ></textarea>
+                            </div>
+                            <div className="flex justify-between items-center pt-2">
+                                <div className="text-xs text-slate-400 flex items-center gap-1">
+                                    {clientId ? <span className="text-emerald-600 font-bold flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Outlook Connected</span> : <span>Using Default Mail App</span>}
+                                </div>
+                                <div className="flex gap-2">
+                                    <button 
+                                        onClick={() => window.open(`mailto:${emailTo}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`)}
+                                        className="text-slate-500 hover:text-blue-600 px-4 py-2 text-sm font-bold flex items-center gap-2"
+                                    >
+                                        <ExternalLink className="w-4 h-4" /> Open App
+                                    </button>
+                                    <button 
+                                        onClick={handleSendEmail} 
+                                        disabled={isSending}
+                                        className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                                    >
+                                        {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                                        Send Email
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

@@ -194,6 +194,47 @@ export const fetchOutlookEmails = async (): Promise<Lead[]> => {
     }
 };
 
+export const sendOutlookEmail = async (to: string, subject: string, body: string): Promise<void> => {
+    try {
+        const accessToken = await getGraphToken(["Mail.Send"]);
+        
+        const mail = {
+            message: {
+                subject: subject,
+                body: {
+                    contentType: "Text",
+                    content: body
+                },
+                toRecipients: [
+                    {
+                        emailAddress: {
+                            address: to
+                        }
+                    }
+                ]
+            },
+            saveToSentItems: "true"
+        };
+
+        const response = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(mail)
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error?.message || response.statusText);
+        }
+    } catch (error: any) {
+        console.error("Send Mail Error", error);
+        throw new Error(error.message || "Failed to send email.");
+    }
+};
+
 export const fetchGmailEmails = async (): Promise<Lead[]> => {
     // Placeholder for Gmail Logic - Requires Google API Client Library
     console.log("Fetching Gmail (Simulated)...");

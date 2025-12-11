@@ -51,7 +51,8 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
       status: '',
       value: '',
       image: '',
-      address: ''
+      address: '',
+      dateCreated: ''
   });
   
   // Schedule Analysis State
@@ -78,9 +79,11 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
 
   const parseDate = (val: any) => {
       if (!val) return undefined;
+      // Handle Excel Serial Date
       if (typeof val === 'number') {
           return new Date(Math.round((val - 25569)*86400*1000)).toISOString();
       }
+      // Handle String
       const d = new Date(val);
       if (!isNaN(d.getTime())) {
           return d.toISOString();
@@ -187,6 +190,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
               if (lower.includes('value') || lower.includes('amount') || lower.includes('price')) guess.value = c.name;
               if (lower.includes('image') || lower.includes('photo') || lower.includes('pic')) guess.image = c.name;
               if (lower.includes('address') || lower.includes('location')) guess.address = c.name;
+              if (lower.includes('date') || lower.includes('created')) guess.dateCreated = c.name;
           });
           setFieldMapping(guess);
           setSpStep(3);
@@ -217,6 +221,10 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
                   }
               }
 
+              const mappedDate = fieldMapping.dateCreated && fields[fieldMapping.dateCreated] ? parseDate(fields[fieldMapping.dateCreated]) : undefined;
+              // Use explicit mapped date -> then Created metadata -> then fallback to Now
+              const finalDate = mappedDate || item.createdDateTime || new Date().toISOString();
+
               newProjects.push({
                   id: `sp-${item.id}`,
                   name: fields[fieldMapping.name] || 'Untitled',
@@ -225,7 +233,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
                   contractValue: Number(fields[fieldMapping.value]) || 0,
                   address: fields[fieldMapping.address] || 'Miami, FL',
                   projectImage: imageUrl,
-                  dateCreated: new Date().toISOString(),
+                  dateCreated: finalDate,
                   laborRate: 75,
                   items: []
               } as ProjectEstimate);
@@ -325,9 +333,13 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
                 const phone = findValue(row, ['Phone', 'Client Phone', 'Mobile']);
                 const email = findValue(row, ['Email', 'Client Email']);
                 const contact = [email, phone].filter(Boolean).join(' | ');
+                
+                // Parse Dates
                 const deliveryDate = parseDate(findValue(row, ['Delivery Date', 'Due Date']));
                 const expirationDate = parseDate(findValue(row, ['Expiration Date', 'Valid Until']));
                 const awardedDate = parseDate(findValue(row, ['Awarded Date', 'Start Date']));
+                const createdDate = parseDate(findValue(row, ['Date Created', 'Created', 'Date', 'Estimate Date'])) || new Date().toISOString();
+
                 let validImage = undefined;
                 if (projectImage && (projectImage.startsWith('http') || projectImage.startsWith('data:'))) {
                     validImage = projectImage;
@@ -340,7 +352,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
                     city: findValue(row, ['City', 'Town']) || 'Miami',
                     estimator: findValue(row, ['Estimator', 'Owner', 'Salesperson']) || 'Unassigned',
                     contactInfo: contact || findValue(row, ['Contact', 'Contact Info']),
-                    dateCreated: new Date().toISOString(),
+                    dateCreated: createdDate,
                     deliveryDate: deliveryDate,
                     expirationDate: expirationDate,
                     awardedDate: awardedDate,
@@ -366,6 +378,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
 
   const handleDownloadTemplate = () => {
       const template = [{
+              "Date Created": "2023-05-10",
               "Project Name": "Example Condo Reno",
               "Client": "John Doe Properties",
               "Client Phone": "305-555-0123",
@@ -375,8 +388,8 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
               "Status": "Draft",
               "Value": 15000,
               "Estimator": "Carlos S.",
-              "Delivery Date": "01/25/2024",
-              "Expiration Date": "02/25/2024",
+              "Delivery Date": "2023-05-25",
+              "Expiration Date": "2023-06-25",
               "Awarded Date": "",
               "Image URL": "https://example.com/photo.jpg"
       }];
@@ -522,7 +535,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6 h-full flex flex-col">
-      {/* ... Header and Filters same as v7.3 ... */}
+      {/* ... Header and Filters ... */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 shrink-0">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
@@ -639,7 +652,6 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
         </div>
       </div>
 
-      {/* ... (Map and Table Render Logic - Same as previous v7.3 ProjectList) ... */}
       {viewMode === 'map' ? (
           <div className="flex-1 min-h-[500px] bg-white rounded-xl shadow-sm border border-slate-200 p-1">
               <ProjectMap projects={filteredProjects} />
@@ -689,7 +701,8 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
                                     </td>
                                     <td className="px-6 py-3">
                                         <div className="flex flex-col gap-1">
-                                            {project.status === 'Won' && project.awardedDate ? <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded w-fit">Won: {new Date(project.awardedDate).toLocaleDateString()}</span> : <><span className="text-xs text-slate-500">Due: {project.deliveryDate ? new Date(project.deliveryDate).toLocaleDateString() : '-'}</span><span className="text-xs text-slate-400">Exp: {project.expirationDate ? new Date(project.expirationDate).toLocaleDateString() : '-'}</span></>}
+                                            <span className="text-xs text-slate-500" title="Created Date">Cr: {new Date(project.dateCreated).toLocaleDateString()}</span>
+                                            {project.status === 'Won' && project.awardedDate ? <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded w-fit">Won: {new Date(project.awardedDate).toLocaleDateString()}</span> : <><span className="text-xs text-slate-400">Due: {project.deliveryDate ? new Date(project.deliveryDate).toLocaleDateString() : '-'}</span></>}
                                         </div>
                                     </td>
                                     {(activeTab === 'estimates' || activeTab === 'all') && (<td className="px-6 py-3">{!isWonOrLost && followUp ? <div className={`flex items-center gap-1.5 text-xs font-medium ${isUrgent ? 'text-orange-600' : 'text-slate-500'}`}><Clock className="w-3.5 h-3.5" />{followUp.toLocaleDateString()}</div> : <span className="text-xs text-slate-300">-</span>}</td>)}
@@ -709,7 +722,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
           </div>
       )}
 
-      {/* --- MODALS --- */}
+      {/* ... MODALS (Edit, SP, Preview) ... */}
       
       {/* Edit Project Modal */}
       {editingProject && (
@@ -751,6 +764,26 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
                           <div>
                               <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Address</label>
                               <input value={editingProject.address} onChange={(e) => setEditingProject({...editingProject, address: e.target.value})} className="w-full border border-slate-300 rounded-lg p-2.5 text-sm" />
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Date Created</label>
+                                  <input 
+                                    type="date"
+                                    value={editingProject.dateCreated ? new Date(editingProject.dateCreated).toISOString().split('T')[0] : ''} 
+                                    onChange={(e) => setEditingProject({...editingProject, dateCreated: new Date(e.target.value).toISOString()})} 
+                                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm" 
+                                  />
+                              </div>
+                              <div>
+                                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Value ($)</label>
+                                  <input 
+                                    type="number"
+                                    value={editingProject.contractValue || 0} 
+                                    onChange={(e) => setEditingProject({...editingProject, contractValue: Number(e.target.value)})} 
+                                    className="w-full border border-slate-300 rounded-lg p-2.5 text-sm" 
+                                  />
+                              </div>
                           </div>
                           
                           <div className="border-t border-slate-100 pt-4 mt-4">
@@ -870,7 +903,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
                              </div>
                              <div>
                                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tenant ID</label>
-                                 <input value={spTenantId} onChange={(e) => setSpTenantId(e.target.value)} className="w-full border p-2 rounded text-sm" placeholder="e.g. 555-..." />
+                                 <input value={spTenantId} onChange={(e) => setSpTenantId(e.target.value)} className="w-full border p-2 rounded text-sm" placeholder="e.g. 555y1dg..." />
                              </div>
                              <div>
                                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Client ID (Optional)</label>
