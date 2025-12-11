@@ -1,17 +1,18 @@
 import React, { useState } from 'react';
 import { Lead, ProjectEstimate } from '../types';
 import { fetchOutlookEmails, getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId } from '../services/emailIntegration';
-import { Mail, RefreshCw, Settings, User as UserIcon, Phone, Search, Save, Loader2, Trello, List, ArrowRight, CheckCircle, XCircle, DollarSign, Plus, ArrowUpRight, ArrowDownRight, Trophy, AlertCircle } from 'lucide-react';
+import { Mail, RefreshCw, Settings, User as UserIcon, Phone, Search, Save, Loader2, Trello, List, ArrowRight, CheckCircle, XCircle, DollarSign, Plus, ArrowUpRight, ArrowDownRight, Trophy, AlertCircle, Trash2 } from 'lucide-react';
 
 interface CRMProps {
     leads: Lead[];
     setLeads: (leads: Lead[]) => void;
     opportunities: any[];
     setOpportunities: (opps: any[]) => void;
-    projects?: ProjectEstimate[]; 
+    projects?: ProjectEstimate[];
+    setProjects?: (projects: ProjectEstimate[]) => void;
 }
 
-export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpportunities, projects = [] }) => {
+export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpportunities, projects = [], setProjects }) => {
     const [activeTab, setActiveTab] = useState<'pipeline' | 'leads'>('pipeline');
     const [isLoading, setIsLoading] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
@@ -70,38 +71,55 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
     };
 
     const convertToOpportunity = (lead: Lead) => {
-        const newOpp = {
-            id: `opp-${Date.now()}`,
-            title: `Deal: ${lead.name}`,
-            value: 0,
-            stage: 'Qualification',
+        if (!setProjects) return;
+        const newProject: ProjectEstimate = {
+            id: `proj-${Date.now()}`,
+            name: lead.name,
             client: lead.name,
-            contact: lead.email,
-            date: new Date().toISOString()
+            contactInfo: lead.email,
+            address: 'Miami, FL',
+            status: 'Draft',
+            dateCreated: new Date().toISOString(),
+            laborRate: 75,
+            items: [],
+            contractValue: 0
         };
-        setOpportunities([...opportunities, newOpp]);
+        setProjects([...projects, newProject]);
         setLeads(leads.filter(l => l.id !== lead.id));
         setActiveTab('pipeline');
     };
 
-    const moveStage = (oppId: string, direction: 'next' | 'prev') => {
-        const stages = ['Qualification', 'Proposal', 'Negotiation', 'Closed Won'];
-        const updated = opportunities.map(opp => {
-            if (opp.id === oppId) {
-                const idx = stages.indexOf(opp.stage);
+    // Updated moveStage to handle Project Statuses: Draft -> Sent -> Won
+    const moveStage = (projectId: string, direction: 'next' | 'prev') => {
+        if (!setProjects) return;
+        const stages = ['Draft', 'Sent', 'Won', 'Lost'];
+        const updated = projects.map(p => {
+            if (p.id === projectId) {
+                const idx = stages.indexOf(p.status);
                 let newIdx = idx;
                 if (direction === 'next' && idx < stages.length - 1) newIdx++;
                 if (direction === 'prev' && idx > 0) newIdx--;
-                return { ...opp, stage: stages[newIdx] };
+                // Prevent accidental move from Won to Lost via arrow if index logic causes it.
+                // Draft(0) -> Sent(1) -> Won(2) -> Lost(3).
+                // Actually this flow is fine, user can choose.
+                return { ...p, status: stages[newIdx] as any };
             }
-            return opp;
+            return p;
         });
-        setOpportunities(updated);
+        setProjects(updated);
     };
 
-    const deleteOpportunity = (id: string) => {
-        if(confirm("Remove this opportunity?")) {
-            setOpportunities(opportunities.filter(o => o.id !== id));
+    const markAsLost = (projectId: string) => {
+        if (!setProjects) return;
+        if(confirm("Mark this project as Lost?")) {
+            setProjects(projects.map(p => p.id === projectId ? { ...p, status: 'Lost' } : p));
+        }
+    };
+
+    const deleteProject = (id: string) => {
+        if (!setProjects) return;
+        if(confirm("Delete this project permanently?")) {
+            setProjects(projects.filter(p => p.id !== id));
         }
     };
 
@@ -219,14 +237,18 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
             {activeTab === 'pipeline' && (
                 <div className="flex-1 overflow-x-auto min-h-[500px] pb-4">
                     <div className="flex gap-4 min-w-[1000px] h-full">
-                        {['Qualification', 'Proposal', 'Negotiation', 'Closed Won'].map(stage => {
-                            const stageOpps = opportunities.filter(o => o.stage === stage);
-                            const totalValue = stageOpps.reduce((sum, o) => sum + (o.value || 0), 0);
+                        {['Draft', 'Sent', 'Won', 'Lost'].map(stage => {
+                            // Filter by project status and sort by Date Created (Newest First)
+                            const stageOpps = projects
+                                .filter(p => p.status === stage)
+                                .sort((a, b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime());
+
+                            const totalValue = stageOpps.reduce((sum, p) => sum + (p.contractValue || 0), 0);
                             
                             return (
                                 <div key={stage} className="flex-1 bg-slate-100 rounded-xl p-3 flex flex-col h-full border border-slate-200">
                                     <div className="flex justify-between items-center mb-3 px-1">
-                                        <h3 className="font-bold text-slate-700 text-sm uppercase">{stage}</h3>
+                                        <h3 className={`font-bold text-sm uppercase ${stage === 'Won' ? 'text-emerald-700' : stage === 'Lost' ? 'text-red-700' : 'text-slate-700'}`}>{stage}</h3>
                                         <span className="text-xs font-medium text-slate-500 bg-white px-2 py-0.5 rounded-full border">{stageOpps.length}</span>
                                     </div>
                                     <div className="mb-3 text-right px-1">
@@ -234,50 +256,60 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                     </div>
                                     
                                     <div className="flex-1 space-y-3 overflow-y-auto custom-scrollbar">
-                                        {stageOpps.map(opp => (
-                                            <div key={opp.id} className="bg-white p-3 rounded-lg shadow-sm border border-slate-200 group hover:shadow-md transition-all">
+                                        {stageOpps.map(project => (
+                                            <div key={project.id} className="bg-white p-3 rounded-lg shadow-sm border border-slate-200 group hover:shadow-md transition-all">
                                                 <div className="flex justify-between items-start mb-2">
-                                                    <span className="text-xs font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{opp.client}</span>
-                                                    <button onClick={() => deleteOpportunity(opp.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><XCircle className="w-4 h-4" /></button>
+                                                    <span className="text-xs font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded truncate max-w-[100px]">{project.client}</span>
+                                                    <button onClick={() => deleteProject(project.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><Trash2 className="w-4 h-4" /></button>
                                                 </div>
-                                                <h4 className="font-bold text-slate-800 text-sm mb-1">{opp.title}</h4>
-                                                <p className="text-xs text-slate-500 truncate">{opp.contact}</p>
+                                                <h4 className="font-bold text-slate-800 text-sm mb-1">{project.name}</h4>
+                                                <p className="text-xs text-slate-500 truncate">{project.contactInfo || project.address}</p>
+                                                <p className="text-[10px] text-slate-400 mt-1">{new Date(project.dateCreated).toLocaleDateString()}</p>
                                                 <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center">
-                                                    <span className="font-bold text-slate-700 text-sm">${(opp.value || 0).toLocaleString()}</span>
+                                                    <span className="font-bold text-slate-700 text-sm">${(project.contractValue || 0).toLocaleString()}</span>
                                                     <div className="flex gap-1">
-                                                        {stage !== 'Qualification' && (
-                                                            <button onClick={() => moveStage(opp.id, 'prev')} className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600" title="Move Back">
+                                                        {stage !== 'Draft' && (
+                                                            <button onClick={() => moveStage(project.id, 'prev')} className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600" title="Move Back">
                                                                 <ArrowRight className="w-4 h-4 rotate-180" />
                                                             </button>
                                                         )}
-                                                        {stage !== 'Closed Won' && (
-                                                            <button onClick={() => moveStage(opp.id, 'next')} className="p-1 hover:bg-blue-50 rounded text-blue-400 hover:text-blue-600" title="Move Forward">
+                                                        {stage !== 'Lost' && (
+                                                            <button onClick={() => moveStage(project.id, 'next')} className="p-1 hover:bg-blue-50 rounded text-blue-400 hover:text-blue-600" title={stage === 'Won' ? "Move to Lost" : "Move Forward"}>
                                                                 <ArrowRight className="w-4 h-4" />
+                                                            </button>
+                                                        )}
+                                                        {stage !== 'Lost' && stage !== 'Won' && (
+                                                            <button onClick={() => markAsLost(project.id)} className="p-1 hover:bg-red-50 rounded text-slate-300 hover:text-red-500" title="Mark Lost">
+                                                                <XCircle className="w-4 h-4" />
                                                             </button>
                                                         )}
                                                     </div>
                                                 </div>
                                             </div>
                                         ))}
-                                        {stage === 'Qualification' && (
+                                        {stage === 'Draft' && (
                                             <button 
                                                 onClick={() => {
-                                                    const name = prompt("Enter Opportunity Name:");
-                                                    if(name) {
-                                                        setOpportunities([...opportunities, {
-                                                            id: `opp-${Date.now()}`,
-                                                            title: name,
-                                                            value: 0,
-                                                            stage: 'Qualification',
+                                                    const name = prompt("Enter Project Name:");
+                                                    if(name && setProjects) {
+                                                        const newProject: ProjectEstimate = {
+                                                            id: `proj-${Date.now()}`,
+                                                            name: name,
                                                             client: 'New Client',
-                                                            contact: '',
-                                                            date: new Date().toISOString()
-                                                        }]);
+                                                            contactInfo: '',
+                                                            address: 'Miami, FL',
+                                                            status: 'Draft',
+                                                            dateCreated: new Date().toISOString(),
+                                                            laborRate: 75,
+                                                            items: [],
+                                                            contractValue: 0
+                                                        };
+                                                        setProjects([...projects, newProject]);
                                                     }
                                                 }}
                                                 className="w-full py-2 border-2 border-dashed border-slate-300 rounded-lg text-slate-400 text-sm font-bold hover:border-blue-400 hover:text-blue-500 hover:bg-white transition flex items-center justify-center gap-2"
                                             >
-                                                <Plus className="w-4 h-4" /> Add Deal
+                                                <Plus className="w-4 h-4" /> Add Project
                                             </button>
                                         )}
                                     </div>
@@ -338,7 +370,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                             <button 
                                                 onClick={() => convertToOpportunity(lead)} 
                                                 className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded" 
-                                                title="Convert to Opportunity"
+                                                title="Convert to Project (Draft)"
                                             >
                                                 <CheckCircle className="w-4 h-4" />
                                             </button>

@@ -201,7 +201,7 @@ export const App: React.FC = () => {
             case ViewState.PROJECTS: return <ProjectList projects={projects} setProjects={setProjects} onOpenProject={() => {}} tickets={tickets} />;
             case ViewState.ESTIMATE_NEW: return <Estimator materials={materials} projects={projects} />;
             case ViewState.DATABASE: return <PriceDatabase materials={materials} setMaterials={setMaterials} />;
-            case ViewState.CRM: return <CRM leads={leads} setLeads={setLeads} opportunities={opportunities} setOpportunities={setOpportunities} projects={projects} />;
+            case ViewState.CRM: return <CRM leads={leads} setLeads={setLeads} opportunities={opportunities} setOpportunities={setOpportunities} projects={projects} setProjects={setProjects} />;
             case ViewState.SERVICE: return <ServiceModule user={user} materials={materials} projects={projects} tickets={tickets} setTickets={setTickets} />;
             case ViewState.PRICE_ANALYSIS: return <PriceAnalysis purchases={purchases} setPurchases={setPurchases} materials={materials} setMaterials={setMaterials} projects={projects} />;
             case ViewState.CLOUD_DB: return <SharePointConnect projects={projects} setProjects={setProjects} materials={materials} tickets={tickets} purchases={purchases} setPurchases={setPurchases} />;
