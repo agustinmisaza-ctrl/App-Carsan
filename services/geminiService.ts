@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type, Chat, LiveServerMessage, Modality } from "@google/genai";
 import { MaterialItem, AnalysisResult, Lead, ProjectEstimate, ServiceTicket, PurchaseRecord } from "../types";
 
@@ -361,7 +360,9 @@ export const generateInvoiceFromNotes = async (
 export const createAssistantChat = (
   projects: ProjectEstimate[] = [],
   tickets: ServiceTicket[] = [],
-  materials: MaterialItem[] = []
+  materials: MaterialItem[] = [],
+  leads: Lead[] = [],
+  purchases: PurchaseRecord[] = []
 ): Chat => {
   if (!process.env.API_KEY) {
     throw new Error("API Key not found");
@@ -377,26 +378,46 @@ export const createAssistantChat = (
     `- Change Order: ${t.id} | Project Ref: ${t.projectId} | Client: ${t.clientName} | Status: ${t.status} | Date: ${t.dateCreated.split('T')[0]}`
   ).join('\n');
 
+  const leadSummary = leads.slice(0, 20).map(l => 
+    `- Lead: ${l.name} | Source: ${l.source} | Date: ${l.dateAdded.split('T')[0]} | Notes: ${l.notes ? l.notes.substring(0, 50) + '...' : ''}`
+  ).join('\n');
+
+  const purchaseSummary = purchases.slice(0, 20).map(p => 
+    `- Purchase: ${p.itemDescription} | Qty: ${p.quantity} | Total: $${p.totalCost} | Supplier: ${p.supplier} | Project: ${p.projectName}`
+  ).join('\n');
+
+  const totalSpend = purchases.reduce((acc, p) => acc + p.totalCost, 0);
+
   const materialStats = `Database contains ${materials.length} items. Categories: ${Array.from(new Set(materials.map(m => m.category))).join(', ')}.`;
 
   const systemInstruction = `
     You are 'Sparky', an expert AI assistant for Carsan Electric's estimating application in Miami, FL.
     
-    You have access to the live database of the application.
+    You have access to the complete live database of the application.
     
     **Current Application Data Context:**
     
     **Projects (Estimates):**
-    ${projectSummary}
+    ${projectSummary || "No projects found."}
     
     **Change Orders:**
-    ${ticketSummary}
+    ${ticketSummary || "No change orders found."}
+    
+    **CRM Leads (Recent):**
+    ${leadSummary || "No leads found."}
+
+    **Purchase History (Recent):**
+    ${purchaseSummary || "No recent purchases."}
+    Total Spend Recorded: $${totalSpend.toLocaleString()}
     
     **Materials:**
     ${materialStats}
     
     **Your Capabilities:**
-    1. **Data Analysis**: Answer questions about the data provided above. e.g. "How many projects were sent in the last 15 days?", "What is the status of the Brickell project?".
+    1. **Data Analysis**: Answer questions about the data provided above. 
+       - e.g. "How many projects were sent in the last 15 days?"
+       - e.g. "Do we have any leads from Outlook?"
+       - e.g. "What is our total spend on materials?"
     2. **Electrical Knowledge**: Answer questions about NEC 2020/2023 codes, wiring methods, and Miami-Dade specific requirements.
     3. **Estimation Help**: Assist with labor unit calculations, material pricing trends, and estimating formulas.
     

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MessageCircle, X, Send, Bot, Loader2, Mic, MicOff, Volume2 } from 'lucide-react';
 import { createAssistantChat, connectLiveSession, float32ArrayToBase64, base64ToFloat32Array } from '../services/geminiService';
 import { Chat, GenerateContentResponse, LiveServerMessage } from "@google/genai";
-import { ProjectEstimate, MaterialItem, ServiceTicket } from '../types';
+import { ProjectEstimate, MaterialItem, ServiceTicket, Lead, PurchaseRecord } from '../types';
 
 interface Message {
   role: 'user' | 'model';
@@ -13,9 +13,11 @@ interface AIAssistantProps {
     projects?: ProjectEstimate[];
     materials?: MaterialItem[];
     tickets?: ServiceTicket[];
+    leads?: Lead[];
+    purchases?: PurchaseRecord[];
 }
 
-export const AIAssistant: React.FC<AIAssistantProps> = ({ projects = [], materials = [], tickets = [] }) => {
+export const AIAssistant: React.FC<AIAssistantProps> = ({ projects = [], materials = [], tickets = [], leads = [], purchases = [] }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     { role: 'model', text: 'Hello! I am Sparky, your Carsan Electric AI assistant. How can I help you with your estimate today?' }
@@ -46,16 +48,19 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ projects = [], materia
   useEffect(() => {
     try {
         // Initialize chat with current data context
-        if (!chatSession.current) {
-            chatSession.current = createAssistantChat(projects, tickets, materials);
-        }
+        // If chat session exists, we don't necessarily destroy it, but we might want to update context if data changes significantly.
+        // For simplicity, we re-create it on first load or just use ref. 
+        // To support dynamic updates, we should probably re-create it if key data changes, but that resets conversation.
+        // Best approach for this simple app: Create new chat session instance when component mounts or data updates significantly if we want context freshness.
+        // Currently, we just lazy init in handleSend.
+        chatSession.current = createAssistantChat(projects, tickets, materials, leads, purchases);
     } catch (e) {
         console.error("Failed to init chat", e);
     }
     return () => {
         stopVoiceSession();
     };
-  }, [projects, tickets, materials]); // Re-init if data changes? For now, we only init once to keep chat history valid.
+  }, [projects, tickets, materials, leads, purchases]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -72,7 +77,7 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ projects = [], materia
 
     try {
       if (!chatSession.current) {
-         chatSession.current = createAssistantChat(projects, tickets, materials);
+         chatSession.current = createAssistantChat(projects, tickets, materials, leads, purchases);
       }
       
       const response = await chatSession.current.sendMessageStream({ message: userMsg });

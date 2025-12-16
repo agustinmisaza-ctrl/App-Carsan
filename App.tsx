@@ -38,6 +38,8 @@ export const App: React.FC = () => {
     const [opportunities, setOpportunities] = useState<any[]>(() => loadState('carsan_opportunities', []));
     const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => loadState('carsan_audit_logs', []));
 
+    const currentYear = new Date().getFullYear();
+
     useEffect(() => localStorage.setItem('carsan_projects', JSON.stringify(projects)), [projects]);
     useEffect(() => localStorage.setItem('carsan_materials', JSON.stringify(materials)), [materials]);
     useEffect(() => localStorage.setItem('carsan_tickets', JSON.stringify(tickets)), [tickets]);
@@ -77,21 +79,27 @@ export const App: React.FC = () => {
                         {/* 1. Revenue Overview */}
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Revenue Won (YTD)</h3>
+                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Revenue Won ({currentYear})</h3>
                                 <p className="text-2xl font-bold text-emerald-600">
-                                    ${projects.filter(p => p.status === 'Won').reduce((sum, p) => sum + (p.contractValue || 0), 0).toLocaleString()}
+                                    ${projects
+                                        .filter(p => p.status === 'Won' && new Date(p.awardedDate || p.dateCreated).getFullYear() === currentYear)
+                                        .reduce((sum, p) => sum + (p.contractValue || 0), 0).toLocaleString()}
                                 </p>
                             </div>
                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Pipeline Value</h3>
+                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Pipeline ({currentYear})</h3>
                                 <p className="text-2xl font-bold text-blue-600">
-                                    ${projects.filter(p => p.status === 'Draft' || p.status === 'Sent').reduce((sum, p) => sum + (p.contractValue || 0), 0).toLocaleString()}
+                                    ${projects
+                                        .filter(p => (p.status === 'Draft' || p.status === 'Sent') && new Date(p.dateCreated).getFullYear() === currentYear)
+                                        .reduce((sum, p) => sum + (p.contractValue || 0), 0).toLocaleString()}
                                 </p>
                             </div>
                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Service Revenue</h3>
+                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Service Revenue ({currentYear})</h3>
                                 <p className="text-2xl font-bold text-indigo-600">
-                                    ${tickets.filter(t => t.status === 'Authorized' || t.status === 'Completed').reduce((sum, t) => {
+                                    ${tickets
+                                        .filter(t => (t.status === 'Authorized' || t.status === 'Completed') && new Date(t.dateCreated).getFullYear() === currentYear)
+                                        .reduce((sum, t) => {
                                         const mat = t.items.reduce((s, i) => s + (i.quantity * i.unitMaterialCost), 0);
                                         const lab = t.items.reduce((s, i) => s + (i.quantity * i.unitLaborHours * t.laborRate), 0);
                                         return sum + mat + lab;
@@ -99,9 +107,11 @@ export const App: React.FC = () => {
                                 </p>
                             </div>
                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Purchase Spend</h3>
+                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Purchase Spend ({currentYear})</h3>
                                 <p className="text-2xl font-bold text-slate-700">
-                                    ${purchases.reduce((sum, p) => sum + (p.totalCost || 0), 0).toLocaleString()}
+                                    ${purchases
+                                        .filter(p => new Date(p.date).getFullYear() === currentYear)
+                                        .reduce((sum, p) => sum + (p.totalCost || 0), 0).toLocaleString()}
                                 </p>
                             </div>
                         </div>
@@ -215,7 +225,7 @@ export const App: React.FC = () => {
             <main className="flex-1 flex flex-col relative overflow-hidden md:ml-64 transition-all duration-300">
                 <div className="md:hidden bg-slate-900 text-white p-4 flex justify-between items-center shrink-0"><span className="font-bold">CARSAN Electric</span><button onClick={() => setIsSidebarOpen(true)}>Menu</button></div>
                 <div className="flex-1 overflow-auto">{renderView()}</div>
-                <AIAssistant projects={projects} materials={materials} tickets={tickets} />
+                <AIAssistant projects={projects} materials={materials} tickets={tickets} leads={leads} purchases={purchases} />
             </main>
         </div>
     );
