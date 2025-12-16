@@ -36,11 +36,9 @@
     <script>
       if ('serviceWorker' in navigator) {
         const registerSW = () => {
-          // Use relative path resolution against window.location.href to ensure correct origin and path
-          // regardless of iframe or subpath deployment.
           try {
-            const swUrl = new URL('./sw.js', window.location.href).href;
-            navigator.serviceWorker.register(swUrl)
+            // Using direct path to avoid construction errors with invalid window.location.href
+            navigator.serviceWorker.register('./sw.js')
               .then(registration => {
                 console.log('ServiceWorker registration successful');
               })
