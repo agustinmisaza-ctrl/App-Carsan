@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { PurchaseRecord, MaterialItem, ProjectEstimate, VarianceItem } from '../types';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ScatterChart, Scatter, ComposedChart, Cell, ReferenceLine } from 'recharts';
-import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, PieChart, Sparkles, ListFilter, Flame, AlertTriangle } from 'lucide-react';
+import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, PieChart, Sparkles, ListFilter, Flame, AlertTriangle, Trash2, Plus, Save } from 'lucide-react';
 import { extractInvoiceData } from '../services/geminiService';
 import * as XLSX from 'xlsx';
 import { parseCurrency, normalizeSupplier } from '../utils/purchaseData';
@@ -186,6 +186,8 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
       return varianceItems;
   }, [purchases, projects]);
 
+  // --- HANDLERS ---
+
   const handleInvoiceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -200,7 +202,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
               const records = await extractInvoiceData(base64);
               if (records.length > 0) {
                   setScannedRecords(records);
-                  showNotification('success', `AI identified ${records.length} items. Please review.`);
+                  showNotification('success', `AI identified ${records.length} items. Please review below.`);
               } else {
                   showNotification('error', "No items could be extracted.");
               }
@@ -228,22 +230,27 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
               const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
               if (Array.isArray(jsonData) && setPurchases) {
-                  const newRecords: PurchaseRecord[] = jsonData.map((row: any, idx) => ({
-                        id: `bulk-${Date.now()}-${idx}`,
-                        date: row['Date'] ? new Date(row['Date']).toISOString() : new Date().toISOString(),
-                        poNumber: String(row['Purchase Order #'] || row['PO'] || ''),
-                        brand: String(row['Brand'] || ''),
-                        itemDescription: String(row['Item'] || row['Description'] || ''),
-                        quantity: Number(row['Quantity'] || 0),
-                        unitCost: parseCurrency(String(row['Unit Cost'] || row['Cost'] || 0)),
-                        totalCost: parseCurrency(String(row['Total'] || 0)),
-                        supplier: normalizeSupplier(String(row['Supplier'] || '')),
-                        projectName: String(row['Project'] || ''),
-                        type: String(row['TYPE'] || 'Material'),
-                        source: 'Bulk Import'
-                  })).filter(r => r.itemDescription); 
+                  const newRecords: PurchaseRecord[] = jsonData.map((row: any, idx) => {
+                        const qty = Number(row['Quantity'] || row['Qty'] || 0);
+                        const unit = parseCurrency(String(row['Unit Cost'] || row['Cost'] || row['Price'] || 0));
+                        return {
+                            id: `bulk-${Date.now()}-${idx}`,
+                            date: row['Date'] ? new Date(row['Date']).toISOString() : new Date().toISOString(),
+                            poNumber: String(row['Purchase Order #'] || row['PO'] || row['PO Number'] || ''),
+                            brand: String(row['Brand'] || ''),
+                            itemDescription: String(row['Item'] || row['Description'] || row['Item Description'] || ''),
+                            quantity: qty,
+                            unitCost: unit,
+                            totalCost: parseCurrency(String(row['Total'] || row['Total Cost'] || (qty * unit) || 0)),
+                            supplier: normalizeSupplier(String(row['Supplier'] || '')),
+                            projectName: String(row['Project'] || row['Project Name'] || ''),
+                            type: String(row['TYPE'] || row['Type'] || 'Material'),
+                            source: 'Bulk Import'
+                        };
+                  }).filter(r => r.itemDescription); 
 
-                  setPurchases([...purchases, ...newRecords]);
+                  // Use functional update to ensure latest state
+                  setPurchases(prev => [...prev, ...newRecords]);
                   showNotification('success', `Successfully imported ${newRecords.length} records.`);
               }
           } catch (err) {
@@ -251,6 +258,52 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
           }
       };
       reader.readAsArrayBuffer(file);
+  };
+
+  const handleSaveScanned = () => {
+      if (!setPurchases) return;
+      setPurchases(prev => [...prev, ...scannedRecords]);
+      setScannedRecords([]);
+      showNotification('success', 'Scanned records added to database.');
+  };
+
+  const handleManualAdd = () => {
+      if (!setPurchases) return;
+      if (!manualEntry.itemDescription || !manualEntry.supplier) {
+          showNotification('error', 'Item description and supplier are required.');
+          return;
+      }
+      
+      const record: PurchaseRecord = {
+          id: `man-${Date.now()}`,
+          date: manualEntry.date || new Date().toISOString(),
+          poNumber: manualEntry.poNumber || 'Manual',
+          brand: manualEntry.brand || 'N/A',
+          itemDescription: manualEntry.itemDescription,
+          quantity: Number(manualEntry.quantity) || 1,
+          unitCost: Number(manualEntry.unitCost) || 0,
+          totalCost: (Number(manualEntry.quantity) || 1) * (Number(manualEntry.unitCost) || 0),
+          supplier: normalizeSupplier(manualEntry.supplier),
+          projectName: manualEntry.projectName || 'Inventory',
+          type: 'Material',
+          source: 'Manual Entry'
+      };
+
+      setPurchases(prev => [...prev, record]);
+      showNotification('success', 'Record added successfully.');
+      setManualEntry({
+        date: new Date().toISOString().split('T')[0],
+        supplier: '',
+        itemDescription: '',
+        quantity: 1,
+        unitCost: 0,
+        projectName: '',
+        poNumber: ''
+      });
+  };
+
+  const handleDeleteScanned = (index: number) => {
+      setScannedRecords(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleDownloadTemplate = () => {
@@ -440,19 +493,137 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
       )}
 
       {activeTab === 'entry' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                  <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><FileSpreadsheet className="w-5 h-5 text-green-600"/> Bulk Import</h3>
-                  <button onClick={() => bulkInputRef.current?.click()} className="w-full border border-slate-300 text-slate-700 py-2 rounded-lg font-bold text-sm hover:bg-slate-50 mb-2">Select Excel File</button>
-                  <input type="file" ref={bulkInputRef} className="hidden" accept=".xlsx,.xls,.csv" onChange={handleBulkUpload} />
-                  <button onClick={handleDownloadTemplate} className="text-xs text-blue-600 hover:underline">Download Template</button>
+          <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Bulk Import */}
+                  <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                      <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><FileSpreadsheet className="w-5 h-5 text-green-600"/> Bulk Import</h3>
+                      <button onClick={() => bulkInputRef.current?.click()} className="w-full border border-slate-300 text-slate-700 py-2 rounded-lg font-bold text-sm hover:bg-slate-50 mb-2">Select Excel File</button>
+                      <input type="file" ref={bulkInputRef} className="hidden" accept=".xlsx,.xls,.csv" onChange={handleBulkUpload} />
+                      <button onClick={handleDownloadTemplate} className="text-xs text-blue-600 hover:underline">Download Template</button>
+                  </div>
+                  
+                  {/* AI Extractor */}
+                  <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                      <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Sparkles className="w-5 h-5 text-blue-600"/> AI Invoice Extractor</h3>
+                      <div className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer ${isExtracting ? 'bg-blue-50 border-blue-300' : 'border-slate-300 hover:border-blue-500'}`} onClick={() => !isExtracting && fileInputRef.current?.click()}>
+                           <input type="file" ref={fileInputRef} className="hidden" accept="image/*,.pdf" onChange={handleInvoiceUpload} />
+                           {isExtracting ? <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto" /> : <Upload className="w-8 h-8 text-slate-400 mx-auto" />}
+                           <p className="text-sm text-slate-500 mt-2">{isExtracting ? "Analyzing..." : "Upload Invoice"}</p>
+                      </div>
+                  </div>
               </div>
+
+              {/* Scanned Items Review - Appears after scan */}
+              {scannedRecords.length > 0 && (
+                  <div className="bg-white p-6 rounded-xl shadow-sm border border-blue-200 animate-in slide-in-from-top-4">
+                      <div className="flex justify-between items-center mb-4">
+                          <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2">
+                             <CheckCircle className="w-5 h-5 text-emerald-500" /> Review Scanned Items
+                          </h3>
+                          <div className="flex gap-2">
+                              <button onClick={() => setScannedRecords([])} className="px-4 py-2 text-slate-500 text-sm font-bold hover:bg-slate-100 rounded-lg">Discard</button>
+                              <button onClick={handleSaveScanned} className="px-6 py-2 bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 rounded-lg shadow-sm flex items-center gap-2">
+                                  <Save className="w-4 h-4" /> Save to Database
+                              </button>
+                          </div>
+                      </div>
+                      <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                          <table className="w-full text-sm text-left">
+                              <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-xs">
+                                  <tr>
+                                      <th className="px-4 py-2">Item</th>
+                                      <th className="px-4 py-2">Supplier</th>
+                                      <th className="px-4 py-2 text-right">Qty</th>
+                                      <th className="px-4 py-2 text-right">Unit Cost</th>
+                                      <th className="px-4 py-2 text-right">Total</th>
+                                      <th className="px-4 py-2"></th>
+                                  </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                  {scannedRecords.map((rec, i) => (
+                                      <tr key={i} className="hover:bg-slate-50">
+                                          <td className="px-4 py-2 font-medium">{rec.itemDescription}</td>
+                                          <td className="px-4 py-2 text-slate-600">{rec.supplier}</td>
+                                          <td className="px-4 py-2 text-right">{rec.quantity}</td>
+                                          <td className="px-4 py-2 text-right">${rec.unitCost}</td>
+                                          <td className="px-4 py-2 text-right font-bold">${rec.totalCost}</td>
+                                          <td className="px-4 py-2 text-center">
+                                              <button onClick={() => handleDeleteScanned(i)} className="text-slate-300 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
+                                          </td>
+                                      </tr>
+                                  ))}
+                              </tbody>
+                          </table>
+                      </div>
+                  </div>
+              )}
+
+              {/* Manual Entry Form */}
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                  <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Sparkles className="w-5 h-5 text-blue-600"/> AI Invoice Extractor</h3>
-                  <div className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer ${isExtracting ? 'bg-blue-50 border-blue-300' : 'border-slate-300 hover:border-blue-500'}`} onClick={() => !isExtracting && fileInputRef.current?.click()}>
-                       <input type="file" ref={fileInputRef} className="hidden" accept="image/*,.pdf" onChange={handleInvoiceUpload} />
-                       {isExtracting ? <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto" /> : <Upload className="w-8 h-8 text-slate-400 mx-auto" />}
-                       <p className="text-sm text-slate-500 mt-2">{isExtracting ? "Analyzing..." : "Upload Invoice"}</p>
+                  <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Database className="w-5 h-5 text-slate-500"/> Manual Entry</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 items-end">
+                       <div className="col-span-1">
+                           <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Item Description</label>
+                           <input 
+                              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" 
+                              value={manualEntry.itemDescription} 
+                              onChange={(e) => setManualEntry({...manualEntry, itemDescription: e.target.value})}
+                              placeholder="e.g. 1/2 EMT Conduit"
+                           />
+                       </div>
+                       <div className="col-span-1">
+                           <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Supplier</label>
+                           <input 
+                              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" 
+                              value={manualEntry.supplier} 
+                              onChange={(e) => setManualEntry({...manualEntry, supplier: e.target.value})}
+                              placeholder="e.g. Home Depot"
+                           />
+                       </div>
+                       <div className="col-span-1">
+                           <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Date</label>
+                           <input 
+                              type="date"
+                              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" 
+                              value={manualEntry.date ? manualEntry.date.split('T')[0] : ''} 
+                              onChange={(e) => setManualEntry({...manualEntry, date: new Date(e.target.value).toISOString()})}
+                           />
+                       </div>
+                       <div className="col-span-1">
+                           <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Project</label>
+                           <select 
+                              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+                              value={manualEntry.projectName}
+                              onChange={(e) => setManualEntry({...manualEntry, projectName: e.target.value})}
+                           >
+                               <option value="">Inventory / Stock</option>
+                               {uniqueProjects.map(p => <option key={p} value={p}>{p}</option>)}
+                           </select>
+                       </div>
+                       <div className="col-span-1">
+                           <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Quantity</label>
+                           <input 
+                              type="number"
+                              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" 
+                              value={manualEntry.quantity} 
+                              onChange={(e) => setManualEntry({...manualEntry, quantity: Number(e.target.value)})}
+                           />
+                       </div>
+                       <div className="col-span-1">
+                           <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Unit Cost ($)</label>
+                           <input 
+                              type="number"
+                              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" 
+                              value={manualEntry.unitCost} 
+                              onChange={(e) => setManualEntry({...manualEntry, unitCost: Number(e.target.value)})}
+                           />
+                       </div>
+                       <div className="col-span-1">
+                           <button onClick={handleManualAdd} className="w-full bg-slate-900 text-white px-4 py-2.5 rounded-lg font-bold text-sm hover:bg-slate-800 flex items-center justify-center gap-2">
+                               <Plus className="w-4 h-4" /> Add Record
+                           </button>
+                       </div>
                   </div>
               </div>
           </div>
