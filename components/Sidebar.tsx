@@ -152,6 +152,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isO
 
         {/* Navigation */}
         <nav className="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto">
+          
+          <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wider px-4 mb-2 mt-2">Operations</div>
+          
           <button
             onClick={() => handleNavClick(ViewState.DASHBOARD)}
             className={navItemClass(ViewState.DASHBOARD)}
@@ -189,41 +192,42 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isO
           </button>
 
           <button
+            onClick={() => handleNavClick(ViewState.ESTIMATE_NEW)}
+            className={navItemClass(ViewState.ESTIMATE_NEW)}
+          >
+            {currentView === ViewState.ESTIMATE_NEW && <div className="absolute left-0 top-3 bottom-3 w-1 bg-blue-500 rounded-r-full" />}
+            <FileText className={`w-5 h-5 ${currentView === ViewState.ESTIMATE_NEW ? 'text-blue-400' : 'text-slate-500 group-hover:text-blue-400'}`} />
+            <span>Estimator</span>
+          </button>
+
+          <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wider px-4 mb-2 mt-6">Finance</div>
+
+          <button
             onClick={() => handleNavClick(ViewState.PRICE_ANALYSIS)}
             className={navItemClass(ViewState.PRICE_ANALYSIS)}
           >
             {currentView === ViewState.PRICE_ANALYSIS && <div className="absolute left-0 top-3 bottom-3 w-1 bg-blue-500 rounded-r-full" />}
             <BarChart2 className={`w-5 h-5 ${currentView === ViewState.PRICE_ANALYSIS ? 'text-blue-400' : 'text-slate-500 group-hover:text-blue-400'}`} />
-            <span>Price Analysis</span>
+            <span>Financial Suite</span>
           </button>
 
-          <div className="pt-4 pb-2">
-             <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wider px-4 mb-2">Tools</div>
-             <button
-                onClick={() => handleNavClick(ViewState.ESTIMATE_NEW)}
-                className={navItemClass(ViewState.ESTIMATE_NEW)}
-              >
-                {currentView === ViewState.ESTIMATE_NEW && <div className="absolute left-0 top-3 bottom-3 w-1 bg-blue-500 rounded-r-full" />}
-                <FileText className={`w-5 h-5 ${currentView === ViewState.ESTIMATE_NEW ? 'text-blue-400' : 'text-slate-500 group-hover:text-blue-400'}`} />
-                <span>Estimator</span>
-              </button>
-              <button
-                onClick={() => handleNavClick(ViewState.DATABASE)}
-                className={navItemClass(ViewState.DATABASE)}
-              >
-                {currentView === ViewState.DATABASE && <div className="absolute left-0 top-3 bottom-3 w-1 bg-blue-500 rounded-r-full" />}
-                <Database className={`w-5 h-5 ${currentView === ViewState.DATABASE ? 'text-blue-400' : 'text-slate-500 group-hover:text-blue-400'}`} />
-                <span>Price Database</span>
-              </button>
-              <button
-                onClick={() => handleNavClick(ViewState.CLOUD_DB)}
-                className={navItemClass(ViewState.CLOUD_DB)}
-              >
-                {currentView === ViewState.CLOUD_DB && <div className="absolute left-0 top-3 bottom-3 w-1 bg-blue-500 rounded-r-full" />}
-                <Cloud className={`w-5 h-5 ${currentView === ViewState.CLOUD_DB ? 'text-blue-400' : 'text-slate-500 group-hover:text-blue-400'}`} />
-                <span>Cloud Database</span>
-              </button>
-          </div>
+          <button
+            onClick={() => handleNavClick(ViewState.DATABASE)}
+            className={navItemClass(ViewState.DATABASE)}
+          >
+            {currentView === ViewState.DATABASE && <div className="absolute left-0 top-3 bottom-3 w-1 bg-blue-500 rounded-r-full" />}
+            <Database className={`w-5 h-5 ${currentView === ViewState.DATABASE ? 'text-blue-400' : 'text-slate-500 group-hover:text-blue-400'}`} />
+            <span>Price Database</span>
+          </button>
+          <button
+            onClick={() => handleNavClick(ViewState.CLOUD_DB)}
+            className={navItemClass(ViewState.CLOUD_DB)}
+          >
+            {currentView === ViewState.CLOUD_DB && <div className="absolute left-0 top-3 bottom-3 w-1 bg-blue-500 rounded-r-full" />}
+            <Cloud className={`w-5 h-5 ${currentView === ViewState.CLOUD_DB ? 'text-blue-400' : 'text-slate-500 group-hover:text-blue-400'}`} />
+            <span>Cloud Database</span>
+          </button>
+
         </nav>
 
         {/* User Profile / Footer */}

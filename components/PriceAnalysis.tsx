@@ -1,7 +1,7 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { PurchaseRecord, MaterialItem, ProjectEstimate, VarianceItem } from '../types';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ScatterChart, Scatter, ComposedChart, Cell, ReferenceLine } from 'recharts';
-import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, PieChart, Sparkles, ListFilter, Flame, AlertTriangle, Trash2, Plus, Save } from 'lucide-react';
+import React, { useState, useMemo, useRef } from 'react';
+import { PurchaseRecord, MaterialItem, ProjectEstimate, VarianceItem, ServiceTicket } from '../types';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell, ReferenceLine, Scatter, AreaChart, Area } from 'recharts';
+import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, PieChart, Sparkles, ListFilter, Flame, AlertTriangle, Trash2, Plus, Save, Briefcase, Wallet } from 'lucide-react';
 import { extractInvoiceData } from '../services/geminiService';
 import * as XLSX from 'xlsx';
 import { parseCurrency, normalizeSupplier } from '../utils/purchaseData';
@@ -12,14 +12,15 @@ interface PriceAnalysisProps {
   materials?: MaterialItem[]; 
   setMaterials?: (items: MaterialItem[]) => void;
   projects?: ProjectEstimate[]; 
+  tickets?: ServiceTicket[];
 }
 
-export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurchases, materials, setMaterials, projects = [] }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'variance' | 'entry'>('dashboard');
+export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurchases, materials, setMaterials, projects = [], tickets = [] }) => {
+  const [activeTab, setActiveTab] = useState<'overview' | 'job-costing' | 'purchasing' | 'entry'>('overview');
   const [selectedItem, setSelectedItem] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedProject, setSelectedProject] = useState<string>('All');
-  const [sortByValue, setSortByValue] = useState(true); // Default to Pareto sorting
+  const [sortByValue, setSortByValue] = useState(true);
   
   // Data Entry State
   const [isExtracting, setIsExtracting] = useState(false);
@@ -40,12 +41,86 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
   const [notification, setNotification] = useState<{ type: 'success' | 'error', message: string } | null>(null);
   const [showMobileSelector, setShowMobileSelector] = useState(false); 
 
-  // Derived Lists
-  const uniqueProjects = Array.from(new Set(purchases.map(p => p.projectName))).sort();
-  const uniqueSuppliers = Array.from(new Set(purchases.map(p => normalizeSupplier(p.supplier)))).filter(Boolean).sort();
-  const uniqueItemNames = Array.from(new Set(purchases.map(p => p.itemDescription))).filter(Boolean).sort();
-  
-  // --- PARETO ANALYSIS LOGIC ---
+  // --- FINANCIAL CALCULATIONS ---
+
+  const financialData = useMemo(() => {
+      // 1. Revenue
+      const projectRevenue = projects
+          .filter(p => ['Won', 'Ongoing', 'Completed'].includes(p.status))
+          .reduce((sum, p) => sum + (p.contractValue || 0), 0);
+
+      const serviceRevenue = tickets
+          .filter(t => ['Authorized', 'Completed'].includes(t.status))
+          .reduce((sum, t) => {
+              const mat = t.items.reduce((s, i) => s + (i.quantity * i.unitMaterialCost), 0);
+              const lab = t.items.reduce((s, i) => s + (i.quantity * i.unitLaborHours * t.laborRate), 0);
+              return sum + mat + lab;
+          }, 0);
+
+      const totalRevenue = projectRevenue + serviceRevenue;
+
+      // 2. Expenses (Actuals)
+      const materialExpense = purchases.reduce((sum, p) => sum + p.totalCost, 0);
+      
+      // Estimated Labor Expense (Cost to Company, approximated at 40% of Labor Revenue for this calc or based on hours)
+      // Here we assume Labor Rate includes overhead/profit, so actual COST is lower (e.g. $30/hr vs $75/hr billing)
+      // For P&L, let's use a "Cost Basis" multiplier of 0.4 on the billed labor to simulate payroll
+      const laborCostBasis = 0.4; 
+      
+      const projectLaborRev = projects
+        .filter(p => ['Won', 'Ongoing', 'Completed'].includes(p.status))
+        .reduce((sum, p) => sum + p.items.reduce((s, i) => s + (i.quantity * i.unitLaborHours * p.laborRate), 0), 0);
+      
+      const ticketLaborRev = tickets
+        .filter(t => ['Authorized', 'Completed'].includes(t.status))
+        .reduce((sum, t) => sum + t.items.reduce((s, i) => s + (i.quantity * i.unitLaborHours * t.laborRate), 0), 0);
+
+      const totalLaborExpense = (projectLaborRev + ticketLaborRev) * laborCostBasis;
+      const totalExpenses = materialExpense + totalLaborExpense;
+
+      // 3. Net
+      const netProfit = totalRevenue - totalExpenses;
+      const margin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+
+      return { totalRevenue, totalExpenses, netProfit, margin, projectRevenue, serviceRevenue, materialExpense, totalLaborExpense };
+  }, [projects, tickets, purchases]);
+
+  // --- JOB COSTING LOGIC ---
+  const jobCostingData = useMemo(() => {
+      // Get all active projects
+      const activeProjects = projects.filter(p => ['Won', 'Ongoing', 'Completed'].includes(p.status));
+      
+      return activeProjects.map(proj => {
+          // Actual Material Spend
+          const actualMaterial = purchases
+            .filter(p => p.projectName === proj.name)
+            .reduce((sum, p) => sum + p.totalCost, 0);
+
+          // Estimated Labor Cost (from estimate)
+          const estLabor = proj.items.reduce((sum, i) => sum + (i.quantity * i.unitLaborHours * proj.laborRate), 0);
+          
+          // Cost Basis for Labor (Payroll) - simplifying as 40% of billed labor for internal cost
+          const internalLaborCost = estLabor * 0.4;
+
+          const totalCost = actualMaterial + internalLaborCost;
+          const grossProfit = (proj.contractValue || 0) - totalCost;
+          const margin = (proj.contractValue || 0) > 0 ? (grossProfit / (proj.contractValue || 0)) * 100 : 0;
+
+          return {
+              id: proj.id,
+              name: proj.name,
+              status: proj.status,
+              contract: proj.contractValue || 0,
+              actualMaterial,
+              internalLaborCost,
+              totalCost,
+              grossProfit,
+              margin
+          };
+      }).sort((a, b) => a.margin - b.margin); // Sort by lowest margin first (problem areas)
+  }, [projects, purchases]);
+
+  // --- PURCHASING ANALYSIS LOGIC ---
   const processedItemsList = useMemo(() => {
       const itemMap = new Map<string, { total: number, count: number }>();
       purchases.forEach(p => {
@@ -133,58 +208,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
       .filter(s => s.itemsCount > 2)
       .sort((a, b) => a.score - b.score);
   }, [purchases]);
-
-  // --- VARIANCE ANALYSIS LOGIC ---
-  const varianceData = useMemo(() => {
-      const varianceItems: VarianceItem[] = [];
-      const purchasedMap: Record<string, Record<string, { qty: number, cost: number, count: number }>> = {};
-      
-      purchases.forEach(p => {
-          if (!p.projectName || p.projectName === 'Inventory') return;
-          if (!purchasedMap[p.projectName]) purchasedMap[p.projectName] = {};
-          
-          const key = p.itemDescription.trim();
-          if (!purchasedMap[p.projectName][key]) {
-              purchasedMap[p.projectName][key] = { qty: 0, cost: 0, count: 0 };
-          }
-          purchasedMap[p.projectName][key].qty += p.quantity;
-          purchasedMap[p.projectName][key].cost += p.totalCost;
-          purchasedMap[p.projectName][key].count += 1;
-      });
-
-      projects.forEach(proj => {
-          const projectKey = Object.keys(purchasedMap).find(k => k.toLowerCase().includes(proj.name.toLowerCase()) || proj.name.toLowerCase().includes(k.toLowerCase()));
-          const actuals = projectKey ? purchasedMap[projectKey] : {};
-
-          proj.items.forEach(estItem => {
-              const actualItemKey = Object.keys(actuals).find(k => k.toLowerCase().includes(estItem.description.toLowerCase()));
-              const actualData = actualItemKey ? actuals[actualItemKey] : { qty: 0, cost: 0, count: 0 };
-              if (actualItemKey) delete actuals[actualItemKey];
-
-              const estTotal = estItem.quantity * estItem.unitMaterialCost;
-              const actTotal = actualData.cost;
-              let status: any = 'OK';
-              if (actTotal > estTotal * 1.1) status = 'Over Budget';
-              if (actualData.qty > estItem.quantity * 1.1) status = 'Over Quantity';
-              
-              varianceItems.push({
-                  id: `var-${proj.id}-${estItem.id}`,
-                  projectName: proj.name,
-                  itemName: estItem.description,
-                  estimatedQty: estItem.quantity,
-                  estimatedUnitCost: estItem.unitMaterialCost,
-                  purchasedQty: actualData.qty,
-                  avgPurchasedCost: actualData.qty > 0 ? actualData.cost / actualData.qty : 0,
-                  totalEstimated: estTotal,
-                  totalPurchased: actTotal,
-                  costVariance: actTotal - estTotal,
-                  qtyVariance: actualData.qty - estItem.quantity,
-                  status: status
-              });
-          });
-      });
-      return varianceItems;
-  }, [purchases, projects]);
 
   // --- HANDLERS ---
 
@@ -314,6 +337,16 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
       XLSX.writeFile(workbook, "Carsan_Purchase_History_Template.xlsx");
   };
 
+  // Mock Cashflow Data for Chart
+  const cashFlowData = [
+      { name: 'Jan', revenue: financialData.totalRevenue * 0.1, expenses: financialData.totalExpenses * 0.12 },
+      { name: 'Feb', revenue: financialData.totalRevenue * 0.12, expenses: financialData.totalExpenses * 0.11 },
+      { name: 'Mar', revenue: financialData.totalRevenue * 0.15, expenses: financialData.totalExpenses * 0.14 },
+      { name: 'Apr', revenue: financialData.totalRevenue * 0.18, expenses: financialData.totalExpenses * 0.16 },
+      { name: 'May', revenue: financialData.totalRevenue * 0.20, expenses: financialData.totalExpenses * 0.19 },
+      { name: 'Jun', revenue: financialData.totalRevenue * 0.25, expenses: financialData.totalExpenses * 0.22 },
+  ];
+
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
       {notification && (
@@ -325,17 +358,126 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Price Analysis</h1>
-          <p className="text-slate-500 mt-1">Track trends, suppliers, and budget variances.</p>
+          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Financial Suite</h1>
+          <p className="text-slate-500 mt-1">Enterprise Profitability & Job Costing</p>
         </div>
-        <div className="bg-slate-100 p-1 rounded-lg flex">
-            <button onClick={() => setActiveTab('dashboard')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'dashboard' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><LayoutDashboard className="w-4 h-4" /> Dashboard</button>
-            <button onClick={() => setActiveTab('variance')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'variance' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><PieChart className="w-4 h-4" /> Variance</button>
-            <button onClick={() => setActiveTab('entry')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'entry' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><Database className="w-4 h-4" /> Data Entry</button>
+        <div className="bg-slate-100 p-1 rounded-lg flex overflow-x-auto max-w-full">
+            <button onClick={() => setActiveTab('overview')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'overview' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><LayoutDashboard className="w-4 h-4" /> Overview</button>
+            <button onClick={() => setActiveTab('job-costing')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'job-costing' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><Briefcase className="w-4 h-4" /> Job Costing</button>
+            <button onClick={() => setActiveTab('purchasing')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'purchasing' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><Wallet className="w-4 h-4" /> Purchasing</button>
+            <button onClick={() => setActiveTab('entry')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'entry' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><Database className="w-4 h-4" /> Data Entry</button>
         </div>
       </div>
 
-      {activeTab === 'dashboard' && (
+      {/* --- FINANCIAL OVERVIEW TAB --- */}
+      {activeTab === 'overview' && (
+          <div className="space-y-6">
+              {/* P&L Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
+                      <div className="absolute right-0 top-0 p-4 opacity-10"><DollarSign className="w-16 h-16 text-emerald-500" /></div>
+                      <p className="text-xs font-bold text-slate-400 uppercase">Total Revenue</p>
+                      <p className="text-2xl font-bold text-slate-900 mt-1">${financialData.totalRevenue.toLocaleString()}</p>
+                      <div className="text-xs text-slate-500 mt-2">Projects: ${financialData.projectRevenue.toLocaleString()}</div>
+                  </div>
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
+                      <div className="absolute right-0 top-0 p-4 opacity-10"><TrendingUp className="w-16 h-16 text-red-500" /></div>
+                      <p className="text-xs font-bold text-slate-400 uppercase">Total Expenses</p>
+                      <p className="text-2xl font-bold text-slate-900 mt-1">${financialData.totalExpenses.toLocaleString()}</p>
+                      <div className="text-xs text-slate-500 mt-2">Materials: ${financialData.materialExpense.toLocaleString()}</div>
+                  </div>
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
+                      <div className="absolute right-0 top-0 p-4 opacity-10"><Wallet className="w-16 h-16 text-blue-500" /></div>
+                      <p className="text-xs font-bold text-slate-400 uppercase">Net Profit</p>
+                      <p className={`text-2xl font-bold mt-1 ${financialData.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>${financialData.netProfit.toLocaleString()}</p>
+                      <div className="text-xs text-slate-500 mt-2">After Labor & Mat.</div>
+                  </div>
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
+                      <div className="absolute right-0 top-0 p-4 opacity-10"><PieChart className="w-16 h-16 text-indigo-500" /></div>
+                      <p className="text-xs font-bold text-slate-400 uppercase">Profit Margin</p>
+                      <p className={`text-2xl font-bold mt-1 ${financialData.margin >= 15 ? 'text-emerald-600' : 'text-orange-600'}`}>{financialData.margin.toFixed(1)}%</p>
+                      <div className="text-xs text-slate-500 mt-2">Target: 20%</div>
+                  </div>
+              </div>
+
+              {/* Cash Flow Chart */}
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                  <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2">
+                      <TrendingUp className="w-5 h-5 text-blue-500" /> Cash Flow Trends (Last 6 Months)
+                  </h3>
+                  <div className="h-80 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={cashFlowData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                              <defs>
+                                  <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
+                                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                                  </linearGradient>
+                                  <linearGradient id="colorExp" x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.1}/>
+                                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                                  </linearGradient>
+                              </defs>
+                              <XAxis dataKey="name" axisLine={false} tickLine={false} />
+                              <YAxis axisLine={false} tickLine={false} tickFormatter={(val) => `$${val/1000}k`} />
+                              <CartesianGrid vertical={false} stroke="#f1f5f9" />
+                              <Tooltip formatter={(val:number) => [`$${val.toLocaleString()}`, '']} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'}} />
+                              <Legend />
+                              <Area type="monotone" dataKey="revenue" stroke="#10b981" fillOpacity={1} fill="url(#colorRev)" name="Revenue" />
+                              <Area type="monotone" dataKey="expenses" stroke="#ef4444" fillOpacity={1} fill="url(#colorExp)" name="Expenses" />
+                          </AreaChart>
+                      </ResponsiveContainer>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* --- JOB COSTING TAB --- */}
+      {activeTab === 'job-costing' && (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+                  <h3 className="font-bold text-slate-800 flex items-center gap-2"><Briefcase className="w-5 h-5 text-slate-500"/> Project Profitability</h3>
+                  <div className="text-xs text-slate-500 italic">*Labor Cost Estimated at 40% of Billed Labor</div>
+              </div>
+              <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                      <thead className="bg-white text-slate-500 font-bold uppercase text-xs border-b border-slate-200">
+                          <tr>
+                              <th className="px-6 py-4">Project</th>
+                              <th className="px-6 py-4">Status</th>
+                              <th className="px-6 py-4 text-right">Contract</th>
+                              <th className="px-6 py-4 text-right">Mat. Cost</th>
+                              <th className="px-6 py-4 text-right">Labor (Int)</th>
+                              <th className="px-6 py-4 text-right">Total Cost</th>
+                              <th className="px-6 py-4 text-right">Net Profit</th>
+                              <th className="px-6 py-4 text-right">Margin</th>
+                          </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                          {jobCostingData.map(job => (
+                              <tr key={job.id} className="hover:bg-slate-50">
+                                  <td className="px-6 py-3 font-medium text-slate-900">{job.name}</td>
+                                  <td className="px-6 py-3"><span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${job.status === 'Ongoing' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>{job.status}</span></td>
+                                  <td className="px-6 py-3 text-right text-slate-600">${job.contract.toLocaleString()}</td>
+                                  <td className="px-6 py-3 text-right text-slate-600">${job.actualMaterial.toLocaleString()}</td>
+                                  <td className="px-6 py-3 text-right text-slate-600">${job.internalLaborCost.toLocaleString()}</td>
+                                  <td className="px-6 py-3 text-right font-medium text-slate-800">${job.totalCost.toLocaleString()}</td>
+                                  <td className={`px-6 py-3 text-right font-bold ${job.grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>${job.grossProfit.toLocaleString()}</td>
+                                  <td className="px-6 py-3 text-right">
+                                      <span className={`px-2 py-1 rounded text-xs font-bold ${job.margin >= 20 ? 'bg-emerald-100 text-emerald-700' : job.margin >= 0 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                                          {job.margin.toFixed(1)}%
+                                      </span>
+                                  </td>
+                              </tr>
+                          ))}
+                      </tbody>
+                  </table>
+              </div>
+          </div>
+      )}
+
+      {/* --- PURCHASING TAB (Old Dashboard) --- */}
+      {activeTab === 'purchasing' && (
           <div className="space-y-6">
               <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 items-center">
                   <div className="flex items-center gap-2 text-slate-500 text-sm font-bold uppercase mr-2"><Filter className="w-4 h-4" /> Filters:</div>
@@ -345,19 +487,8 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                   </div>
                   <select className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50" value={selectedProject} onChange={(e) => setSelectedProject(e.target.value)}>
                       <option value="All">All Projects</option>
-                      {uniqueProjects.map(p => <option key={p} value={p}>{p}</option>)}
+                      {Array.from(new Set(purchases.map(p => p.projectName))).sort().map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
-              </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                      <p className="text-xs font-bold text-slate-400 uppercase">Total Spend</p>
-                      <p className="text-2xl font-bold text-slate-900 mt-1">${filteredPurchases.reduce((sum, p) => sum + p.totalCost, 0).toLocaleString()}</p>
-                  </div>
-                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                      <p className="text-xs font-bold text-slate-400 uppercase">Suppliers</p>
-                      <p className="text-2xl font-bold text-slate-900 mt-1">{new Set(filteredPurchases.map(p => normalizeSupplier(p.supplier))).size}</p>
-                  </div>
               </div>
 
               {!selectedItem && supplierScorecard.length > 0 && (
@@ -443,55 +574,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
           </div>
       )}
 
-      {activeTab === 'variance' && (
-          <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
-                      <div className="p-3 bg-red-100 text-red-600 rounded-full"><AlertTriangle className="w-6 h-6" /></div>
-                      <div>
-                          <p className="text-xs font-bold text-slate-500 uppercase">Over Budget Items</p>
-                          <p className="text-2xl font-bold text-red-600">{varianceData.filter(v => v.status === 'Over Budget').length}</p>
-                      </div>
-                  </div>
-                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
-                      <div className="p-3 bg-orange-100 text-orange-600 rounded-full"><AlertTriangle className="w-6 h-6" /></div>
-                      <div>
-                          <p className="text-xs font-bold text-slate-500 uppercase">Unplanned Purchases</p>
-                          <p className="text-2xl font-bold text-orange-600">{varianceData.filter(v => v.status === 'Unplanned').length}</p>
-                      </div>
-                  </div>
-              </div>
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                  <div className="overflow-x-auto">
-                      <table className="w-full text-left text-sm">
-                          <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-xs">
-                              <tr>
-                                  <th className="px-6 py-4">Status</th>
-                                  <th className="px-6 py-4">Project</th>
-                                  <th className="px-6 py-4">Item</th>
-                                  <th className="px-6 py-4 text-right">Est. Qty</th>
-                                  <th className="px-6 py-4 text-right">Act. Qty</th>
-                                  <th className="px-6 py-4 text-right">Variance ($)</th>
-                              </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                              {varianceData.map(item => (
-                                  <tr key={item.id} className="hover:bg-slate-50">
-                                      <td className="px-6 py-3"><span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${item.status === 'OK' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{item.status}</span></td>
-                                      <td className="px-6 py-3 font-medium">{item.projectName}</td>
-                                      <td className="px-6 py-3 text-slate-600">{item.itemName}</td>
-                                      <td className="px-6 py-3 text-right">{item.estimatedQty}</td>
-                                      <td className="px-6 py-3 text-right font-bold">{item.purchasedQty}</td>
-                                      <td className={`px-6 py-3 text-right font-bold ${item.costVariance > 0 ? 'text-red-600' : 'text-emerald-600'}`}>${item.costVariance.toFixed(2)}</td>
-                                  </tr>
-                              ))}
-                          </tbody>
-                      </table>
-                  </div>
-              </div>
-          </div>
-      )}
-
+      {/* --- ENTRY TAB --- */}
       {activeTab === 'entry' && (
           <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -598,26 +681,8 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                               onChange={(e) => setManualEntry({...manualEntry, projectName: e.target.value})}
                            >
                                <option value="">Inventory / Stock</option>
-                               {uniqueProjects.map(p => <option key={p} value={p}>{p}</option>)}
+                               {Array.from(new Set(projects.map(p => p.name))).map(p => <option key={p} value={p}>{p}</option>)}
                            </select>
-                       </div>
-                       <div className="col-span-1">
-                           <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Quantity</label>
-                           <input 
-                              type="number"
-                              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" 
-                              value={manualEntry.quantity} 
-                              onChange={(e) => setManualEntry({...manualEntry, quantity: Number(e.target.value)})}
-                           />
-                       </div>
-                       <div className="col-span-1">
-                           <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Unit Cost ($)</label>
-                           <input 
-                              type="number"
-                              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" 
-                              value={manualEntry.unitCost} 
-                              onChange={(e) => setManualEntry({...manualEntry, unitCost: Number(e.target.value)})}
-                           />
                        </div>
                        <div className="col-span-1">
                            <button onClick={handleManualAdd} className="w-full bg-slate-900 text-white px-4 py-2.5 rounded-lg font-bold text-sm hover:bg-slate-800 flex items-center justify-center gap-2">
