@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { PurchaseRecord, MaterialItem, ProjectEstimate, VarianceItem, ServiceTicket } from '../types';
+import { PurchaseRecord, MaterialItem, ProjectEstimate, ServiceTicket } from '../types';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell, ReferenceLine, Scatter, AreaChart, Area } from 'recharts';
-import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, PieChart, Sparkles, ListFilter, Flame, AlertTriangle, Trash2, Plus, Save, Briefcase, Wallet } from 'lucide-react';
+import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, PieChart, Sparkles, ListFilter, Flame, AlertTriangle, Trash2, Plus, Save, Briefcase, Wallet, RefreshCw } from 'lucide-react';
 import { extractInvoiceData } from '../services/geminiService';
 import * as XLSX from 'xlsx';
 import { parseCurrency, normalizeSupplier } from '../utils/purchaseData';
@@ -62,9 +62,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
       // 2. Expenses (Actuals)
       const materialExpense = purchases.reduce((sum, p) => sum + p.totalCost, 0);
       
-      // Estimated Labor Expense (Cost to Company, approximated at 40% of Labor Revenue for this calc or based on hours)
-      // Here we assume Labor Rate includes overhead/profit, so actual COST is lower (e.g. $30/hr vs $75/hr billing)
-      // For P&L, let's use a "Cost Basis" multiplier of 0.4 on the billed labor to simulate payroll
       const laborCostBasis = 0.4; 
       
       const projectLaborRev = projects
@@ -209,6 +206,29 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
       .sort((a, b) => a.score - b.score);
   }, [purchases]);
 
+  const itemSupplierStats = useMemo(() => {
+        if (!selectedItem) return [];
+        const relevant = purchases.filter(p => p.itemDescription === selectedItem);
+        const groups: Record<string, { total: number, count: number, min: number, max: number }> = {};
+        
+        relevant.forEach(r => {
+            const sup = normalizeSupplier(r.supplier);
+            if (!groups[sup]) groups[sup] = { total: 0, count: 0, min: r.unitCost, max: r.unitCost };
+            groups[sup].total += r.unitCost;
+            groups[sup].count += 1;
+            groups[sup].min = Math.min(groups[sup].min, r.unitCost);
+            groups[sup].max = Math.max(groups[sup].max, r.unitCost);
+        });
+
+        return Object.entries(groups).map(([name, stats]) => ({
+            name,
+            avgPrice: stats.total / stats.count,
+            minPrice: stats.min,
+            maxPrice: stats.max,
+            count: stats.count
+        })).sort((a,b) => a.avgPrice - b.avgPrice); // Cheapest first
+  }, [purchases, selectedItem]);
+
   // --- HANDLERS ---
 
   const handleInvoiceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -242,7 +262,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
   const handleBulkUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      e.target.value = '';
+      e.target.value = ''; // Reset input
 
       const reader = new FileReader();
       reader.onload = (event) => {
@@ -256,9 +276,21 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                   const newRecords: PurchaseRecord[] = jsonData.map((row: any, idx) => {
                         const qty = Number(row['Quantity'] || row['Qty'] || 0);
                         const unit = parseCurrency(String(row['Unit Cost'] || row['Cost'] || row['Price'] || 0));
+                        
+                        // FIX: Correct Date Parsing for Excel Serial Dates
+                        let finalDate = new Date().toISOString();
+                        const val = row['Date'];
+                        if (typeof val === 'number') {
+                            // Excel serial date to JS date
+                            finalDate = new Date(Math.round((val - 25569) * 86400 * 1000)).toISOString();
+                        } else if (typeof val === 'string') {
+                            const d = new Date(val);
+                            if (!isNaN(d.getTime())) finalDate = d.toISOString();
+                        }
+
                         return {
                             id: `bulk-${Date.now()}-${idx}`,
-                            date: row['Date'] ? new Date(row['Date']).toISOString() : new Date().toISOString(),
+                            date: finalDate,
                             poNumber: String(row['Purchase Order #'] || row['PO'] || row['PO Number'] || ''),
                             brand: String(row['Brand'] || ''),
                             itemDescription: String(row['Item'] || row['Description'] || row['Item Description'] || ''),
@@ -272,11 +304,11 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                         };
                   }).filter(r => r.itemDescription); 
 
-                  // Use functional update to ensure latest state
                   setPurchases(prev => [...prev, ...newRecords]);
                   showNotification('success', `Successfully imported ${newRecords.length} records.`);
               }
           } catch (err) {
+              console.error(err);
               showNotification('error', "Failed to process Excel file.");
           }
       };
@@ -550,7 +582,13 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                       {selectedItem ? (
                           <>
                               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                                  <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-blue-500" /> Price History: {selectedItem}</h3>
+                                  <div className="flex justify-between items-start mb-4">
+                                      <div>
+                                          <h3 className="font-bold text-slate-800 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-blue-500" /> Price History: {selectedItem}</h3>
+                                          <p className="text-xs text-slate-500">Historical Unit Cost Trend</p>
+                                      </div>
+                                      <button onClick={() => setSelectedItem('')} className="text-xs text-blue-600 hover:underline">Clear Selection</button>
+                                  </div>
                                   <div className="h-64 w-full">
                                       <ResponsiveContainer width="100%" height="100%">
                                           <ComposedChart data={purchases.filter(p => p.itemDescription === selectedItem).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime())}>
@@ -565,9 +603,37 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                                       </ResponsiveContainer>
                                   </div>
                               </div>
+
+                              {/* NEW: Supplier Breakdown for Selected Item */}
+                              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                                  <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Award className="w-5 h-5 text-purple-500" /> Supplier Breakdown</h3>
+                                  <div className="h-64 w-full">
+                                      <ResponsiveContainer width="100%" height="100%">
+                                          <BarChart data={itemSupplierStats} layout="vertical" margin={{top: 5, right: 30, left: 20, bottom: 5}}>
+                                              <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
+                                              <XAxis type="number" tickFormatter={(v) => `$${v}`} />
+                                              <YAxis dataKey="name" type="category" width={100} tick={{fontSize: 11}} />
+                                              <Tooltip 
+                                                  cursor={{fill: '#f8fafc'}}
+                                                  formatter={(value: number) => [`$${value.toFixed(2)}`, 'Avg Unit Cost']}
+                                              />
+                                              <Bar dataKey="avgPrice" fill="#8b5cf6" radius={[0, 4, 4, 0]} barSize={24}>
+                                                  {itemSupplierStats.map((entry, index) => (
+                                                      <Cell key={`cell-${index}`} fill={index === 0 ? '#10b981' : '#8b5cf6'} />
+                                                  ))}
+                                              </Bar>
+                                          </BarChart>
+                                      </ResponsiveContainer>
+                                  </div>
+                                  <div className="mt-4 text-xs text-slate-500">
+                                      <span className="font-bold text-emerald-600">Best Price:</span> {itemSupplierStats[0]?.name} (${itemSupplierStats[0]?.avgPrice.toFixed(2)}) 
+                                      <span className="mx-2">•</span>
+                                      <span className="font-bold text-slate-700">Total Purchases:</span> {itemSupplierStats.reduce((s, i) => s + i.count, 0)}
+                                  </div>
+                              </div>
                           </>
                       ) : (
-                          <div className="h-full flex items-center justify-center bg-slate-50 rounded-xl border border-dashed border-slate-300 text-slate-400"><p>Select an item to view analysis.</p></div>
+                          <div className="h-full flex items-center justify-center bg-slate-50 rounded-xl border border-dashed border-slate-300 text-slate-400"><p>Select an item to view price analysis and supplier comparison.</p></div>
                       )}
                   </div>
               </div>
