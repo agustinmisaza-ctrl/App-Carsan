@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { PurchaseRecord, MaterialItem, ProjectEstimate, ServiceTicket } from '../types';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell, ReferenceLine, Scatter, AreaChart, Area } from 'recharts';
@@ -637,6 +638,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                                       id: `bulk-${Date.now()}-${idx}`,
                                       date: robustParseDate(row['Date']).toISOString(),
                                       poNumber: String(row['Purchase Order #'] || ''),
+                                      brand: String(row['Brand'] || 'N/A'), // Fix here
                                       itemDescription: String(row['Item'] || ''),
                                       quantity: Number(row['Quantity'] || 0),
                                       unitCost: parseCurrency(String(row['Unit Cost'] || 0)),

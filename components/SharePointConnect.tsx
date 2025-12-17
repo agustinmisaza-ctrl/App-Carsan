@@ -2,14 +2,18 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Database, Loader2, Link as LinkIcon, CheckCircle, RefreshCw, ChevronRight, LayoutList, Settings2, Save, Filter } from 'lucide-react';
 import { searchSharePointSites, getSharePointLists, getListColumns, fetchMappedListItems, SPSite, SPList, SPColumn } from '../services/sharepointService';
-import { ProjectMapping, ProjectEstimate } from '../types';
+import { ProjectMapping, ProjectEstimate, MaterialItem, ServiceTicket, PurchaseRecord } from '../types';
 
 interface SharePointConnectProps {
     projects: ProjectEstimate[];
     setProjects: (projects: ProjectEstimate[]) => void;
+    materials?: MaterialItem[];
+    tickets?: ServiceTicket[];
+    purchases?: PurchaseRecord[];
+    setPurchases?: (purchases: PurchaseRecord[]) => void;
 }
 
-export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, setProjects }) => {
+export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, setProjects, materials, tickets, purchases, setPurchases }) => {
     const [step, setStep] = useState<0 | 1 | 2>(0); 
     const [sites, setSites] = useState<SPSite[]>([]);
     const [lists, setLists] = useState<SPList[]>([]);

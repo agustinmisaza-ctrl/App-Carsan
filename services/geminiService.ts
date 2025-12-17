@@ -278,10 +278,18 @@ export const extractInvoiceData = async (base64File: string): Promise<PurchaseRe
         console.log("AI Response:", jsonStr); // Debug log
 
         const result = JSON.parse(jsonStr);
-        const invoice = result.invoiceData;
+        
+        // Robust handling: AI might skip the 'invoiceData' wrapper or return flattened JSON
+        let invoice = result.invoiceData;
+        if (!invoice) {
+            // Fallback: Check if the root object has the invoice properties directly
+            if (result.items && Array.isArray(result.items)) {
+                invoice = result;
+            }
+        }
 
         if (!invoice || !invoice.items) {
-            console.error("Invalid invoice structure:", result);
+            console.error("Invalid invoice structure:", JSON.stringify(result, null, 2));
             return [];
         }
 
