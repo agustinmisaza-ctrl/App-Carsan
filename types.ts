@@ -1,3 +1,4 @@
+
 export enum ViewState {
   DASHBOARD = 'DASHBOARD',
   PROJECTS = 'PROJECTS',
@@ -76,6 +77,18 @@ export interface ProjectEstimate {
   scheduleFile?: string;
   scheduleMilestones?: string;
   followUpDate?: string;
+}
+
+export interface ProjectMapping {
+  name: string;
+  client: string;
+  status: string;
+  contractValue: string;
+  address: string;
+  estimator: string;
+  dateCreated: string;
+  awardedDate: string;
+  area: string; // Nueva columna para filtrado
 }
 
 export interface ServiceTicket {

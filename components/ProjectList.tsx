@@ -4,7 +4,8 @@ import { Search, Upload, Filter, MapPin, ImageIcon, Phone, Download, FileText, C
 import * as XLSX from 'xlsx';
 import { ProjectMap, getPseudoCoordinates } from './ProjectMap';
 import { analyzeSchedule } from '../services/geminiService';
-import { searchSharePointSites, getSharePointLists, getListColumns, getListItems, SPSite, SPList, SPColumn, SPItem, downloadSharePointImage } from '../services/sharepointService';
+// Removed non-existent exported member 'downloadSharePointImage' to fix build error
+import { searchSharePointSites, getSharePointLists, getListColumns, getListItems, SPSite, SPList, SPColumn, SPItem } from '../services/sharepointService';
 import { getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId } from '../services/emailIntegration';
 
 interface ProjectListProps {
