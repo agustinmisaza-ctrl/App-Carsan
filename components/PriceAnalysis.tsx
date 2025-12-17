@@ -8,9 +8,9 @@ import { parseCurrency, normalizeSupplier } from '../utils/purchaseData';
 
 interface PriceAnalysisProps {
   purchases: PurchaseRecord[];
-  setPurchases?: (records: PurchaseRecord[]) => void;
+  setPurchases?: React.Dispatch<React.SetStateAction<PurchaseRecord[]>>;
   materials?: MaterialItem[]; 
-  setMaterials?: (items: MaterialItem[]) => void;
+  setMaterials?: React.Dispatch<React.SetStateAction<MaterialItem[]>>;
   projects?: ProjectEstimate[]; 
   tickets?: ServiceTicket[];
 }
@@ -304,7 +304,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                         };
                   }).filter(r => r.itemDescription); 
 
-                  setPurchases(prev => [...prev, ...newRecords]);
+                  setPurchases((prev: PurchaseRecord[]) => [...prev, ...newRecords]);
                   showNotification('success', `Successfully imported ${newRecords.length} records.`);
               }
           } catch (err) {
@@ -317,7 +317,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
 
   const handleSaveScanned = () => {
       if (!setPurchases) return;
-      setPurchases(prev => [...prev, ...scannedRecords]);
+      setPurchases((prev: PurchaseRecord[]) => [...prev, ...scannedRecords]);
       setScannedRecords([]);
       showNotification('success', 'Scanned records added to database.');
   };
@@ -344,7 +344,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
           source: 'Manual Entry'
       };
 
-      setPurchases(prev => [...prev, record]);
+      setPurchases((prev: PurchaseRecord[]) => [...prev, record]);
       showNotification('success', 'Record added successfully.');
       setManualEntry({
         date: new Date().toISOString().split('T')[0],
@@ -358,7 +358,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
   };
 
   const handleDeleteScanned = (index: number) => {
-      setScannedRecords(prev => prev.filter((_, i) => i !== index));
+      setScannedRecords((prev: PurchaseRecord[]) => prev.filter((_, i) => i !== index));
   };
 
   const handleDownloadTemplate = () => {
