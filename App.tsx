@@ -38,6 +38,39 @@ export const App: React.FC = () => {
 
     const currentYear = new Date().getFullYear();
 
+    // --- AUTO-REPAIR DATA ON STARTUP ---
+    useEffect(() => {
+        const repairDates = () => {
+            let changed = false;
+            
+            const repairedProjects = projects.map(p => {
+                const cleanDate = robustParseDate(p.dateCreated).toISOString();
+                if (p.dateCreated !== cleanDate) { changed = true; return { ...p, dateCreated: cleanDate }; }
+                return p;
+            });
+
+            const repairedPurchases = purchases.map(p => {
+                const cleanDate = robustParseDate(p.date).toISOString();
+                if (p.date !== cleanDate) { changed = true; return { ...p, date: cleanDate }; }
+                return p;
+            });
+
+            const repairedTickets = tickets.map(t => {
+                const cleanDate = robustParseDate(t.dateCreated).toISOString();
+                if (t.dateCreated !== cleanDate) { changed = true; return { ...t, dateCreated: cleanDate }; }
+                return t;
+            });
+
+            if (changed) {
+                console.log("Sparky: Auto-repaired corrupted date formats in your database.");
+                setProjects(repairedProjects);
+                setPurchases(repairedPurchases);
+                setTickets(repairedTickets);
+            }
+        };
+        repairDates();
+    }, []); // Only runs once on boot
+
     useEffect(() => localStorage.setItem('carsan_projects', JSON.stringify(projects)), [projects]);
     useEffect(() => localStorage.setItem('carsan_materials', JSON.stringify(materials)), [materials]);
     useEffect(() => localStorage.setItem('carsan_tickets', JSON.stringify(tickets)), [tickets]);
@@ -93,7 +126,6 @@ export const App: React.FC = () => {
                             </div>
                         </div>
                         
-                        {/* 1. Revenue Overview */}
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                                 <h3 className="text-slate-500 font-bold uppercase text-[10px] tracking-wider mb-2">Revenue Won</h3>
@@ -153,8 +185,6 @@ export const App: React.FC = () => {
                         </div>
 
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                            
-                            {/* 2. Action Items (Follow Ups) */}
                             <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                                 <div className="flex justify-between items-center mb-6">
                                     <h3 className="font-bold text-slate-800 flex items-center gap-2">
@@ -184,7 +214,6 @@ export const App: React.FC = () => {
                                 </div>
                             </div>
 
-                            {/* 3. Operational Snapshot */}
                             <div className="space-y-6">
                                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                                     <h3 className="font-bold text-slate-800 mb-4">Operations</h3>
@@ -225,7 +254,6 @@ export const App: React.FC = () => {
                                     </div>
                                 </div>
 
-                                {/* 4. Activity Log (Admin Only) */}
                                 {user.role === 'admin' && (
                                     <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
                                         <h3 className="font-bold text-slate-800 mb-2 text-sm">Recent Activity</h3>
