@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Lead, ProjectEstimate } from '../types';
 import { fetchOutlookEmails, sendOutlookEmail, getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId } from '../services/emailIntegration';
 import { Mail, RefreshCw, Settings, User as UserIcon, Phone, Search, Save, Loader2, Trello, List, ArrowRight, CheckCircle, XCircle, DollarSign, Plus, ArrowUpRight, ArrowDownRight, Trophy, AlertCircle, Trash2, Send, ExternalLink, Users, Calendar, Clock, FileText, CheckSquare, MessageSquare, Filter } from 'lucide-react';
+import { robustParseDate } from '../utils/purchaseData';
 
 interface CRMProps {
     leads: Lead[];
@@ -39,26 +40,24 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
     });
 
     // --- CENTRALIZED FILTERING LOGIC ---
-    // Filter Projects by Date Created
+    // Filter Projects by Date Created (or Awarded Date for financial tracking)
     const filteredProjects = useMemo(() => {
-        const start = new Date(dateFilter.start);
-        const end = new Date(dateFilter.end);
-        end.setHours(23, 59, 59, 999); // Include end of day
+        const start = robustParseDate(dateFilter.start).getTime();
+        const end = robustParseDate(dateFilter.end).getTime() + (24 * 60 * 60 * 1000) - 1;
 
         return projects.filter(p => {
-            const d = new Date(p.dateCreated);
+            const d = robustParseDate(p.status === 'Won' ? (p.awardedDate || p.dateCreated) : p.dateCreated).getTime();
             return d >= start && d <= end;
         });
     }, [projects, dateFilter]);
 
     // Filter Leads by Date Added
     const filteredLeads = useMemo(() => {
-        const start = new Date(dateFilter.start);
-        const end = new Date(dateFilter.end);
-        end.setHours(23, 59, 59, 999);
+        const start = robustParseDate(dateFilter.start).getTime();
+        const end = robustParseDate(dateFilter.end).getTime() + (24 * 60 * 60 * 1000) - 1;
 
         return leads.filter(l => {
-            const d = new Date(l.dateAdded);
+            const d = robustParseDate(l.dateAdded).getTime();
             return d >= start && d <= end;
         });
     }, [leads, dateFilter]);
@@ -68,9 +67,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
     const wonInPeriod = filteredProjects.filter(p => p.status === 'Won').reduce((sum, p) => sum + (p.contractValue || 0), 0);
     const lostInPeriod = filteredProjects.filter(p => p.status === 'Lost').reduce((sum, p) => sum + (p.contractValue || 0), 0);
     
-    // Using previous year same period for comparison simulation (simplified)
-    // Simplistic Growth calc
-    const sentLastPeriod = 100000; // Mock base for comparison
+    const sentLastPeriod = 100000; 
     const wonLastPeriod = 50000;
 
     const calcGrowth = (current: number, past: number) => {
@@ -118,7 +115,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
         return Object.values(groups).sort((a, b) => {
             if (a.hasUrgent && !b.hasUrgent) return -1;
             if (!a.hasUrgent && b.hasUrgent) return 1;
-            return b.sentCount - a.sentCount; // Prioritize clients with active sent estimates
+            return b.sentCount - a.sentCount; 
         });
     }, [filteredProjects]);
 
@@ -138,7 +135,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
         }
         
         setEmailTo(clientData.email);
-        setActiveTab('email'); // Switch to email tab to finalize
+        setActiveTab('email');
     };
 
     const handleFetchLeads = async () => {
@@ -256,7 +253,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
         window.open(`mailto:simon.martinez@carsanelectric.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
     };
 
-    // Prepare client list for Email tab (Use ALL projects for email selection, not just filtered)
     const allClients = Array.from(new Set([
         ...projects.map(p => ({ name: p.client, email: p.contactInfo })),
         ...leads.map(l => ({ name: l.name, email: l.email }))
@@ -306,9 +302,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                 </div>
             </div>
 
-            {/* --- CONTROLS BAR: SEARCH & DATE FILTER --- */}
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 items-center animate-in slide-in-from-top-1">
-                {/* Search */}
                 <div className="relative flex-1 w-full">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input 
@@ -320,7 +314,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                     />
                 </div>
                 
-                {/* Date Filter */}
                 <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto">
                     <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-slate-50">
                         <Calendar className="w-4 h-4 text-slate-500" />
@@ -372,7 +365,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                 placeholder="e.g. 555y1dg..."
                                 className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
                             />
-                            <p className="text-[10px] text-slate-400 mt-1">Found in Overview &gt; Directory (tenant) ID.</p>
                         </div>
                         <div>
                             <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Client ID</label>
@@ -392,7 +384,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                 </div>
             )}
 
-            {/* FINANCIAL KPIS */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
                     <div className="absolute right-0 top-0 p-4 opacity-10"><DollarSign className="w-16 h-16 text-blue-500" /></div>
@@ -420,15 +411,13 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                 </div>
             </div>
 
-            {/* --- PIPELINE VIEW --- */}
             {activeTab === 'pipeline' && (
                 <div className="flex-1 overflow-x-auto min-h-[500px] pb-4">
                     <div className="flex gap-4 min-w-[1000px] h-full">
                         {['Draft', 'Sent', 'Won', 'Lost'].map(stage => {
                             const stageOpps = filteredProjects
                                 .filter(p => p.status === stage)
-                                .filter(p => p.name.toLowerCase().includes(crmSearchTerm.toLowerCase()) || p.client.toLowerCase().includes(crmSearchTerm.toLowerCase()))
-                                .sort((a, b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime());
+                                .filter(p => p.name.toLowerCase().includes(crmSearchTerm.toLowerCase()) || p.client.toLowerCase().includes(crmSearchTerm.toLowerCase()));
 
                             const totalValue = stageOpps.reduce((sum, p) => sum + (p.contractValue || 0), 0);
                             
@@ -461,44 +450,14 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                                             </button>
                                                         )}
                                                         {stage !== 'Lost' && (
-                                                            <button onClick={() => moveStage(project.id, 'next')} className="p-1 hover:bg-blue-50 rounded text-blue-400 hover:text-blue-600" title={stage === 'Won' ? "Move to Lost" : "Move Forward"}>
+                                                            <button onClick={() => moveStage(project.id, 'next')} className="p-1 hover:bg-blue-50 rounded text-blue-400 hover:text-blue-600">
                                                                 <ArrowRight className="w-4 h-4" />
-                                                            </button>
-                                                        )}
-                                                        {stage !== 'Lost' && stage !== 'Won' && (
-                                                            <button onClick={() => markAsLost(project.id)} className="p-1 hover:bg-red-50 rounded text-slate-300 hover:text-red-500" title="Mark Lost">
-                                                                <XCircle className="w-4 h-4" />
                                                             </button>
                                                         )}
                                                     </div>
                                                 </div>
                                             </div>
                                         ))}
-                                        {stage === 'Draft' && (
-                                            <button 
-                                                onClick={() => {
-                                                    const name = prompt("Enter Project Name:");
-                                                    if(name && setProjects) {
-                                                        const newProject: ProjectEstimate = {
-                                                            id: `proj-${Date.now()}`,
-                                                            name: name,
-                                                            client: 'New Client',
-                                                            contactInfo: '',
-                                                            address: 'Miami, FL',
-                                                            status: 'Draft',
-                                                            dateCreated: new Date().toISOString(),
-                                                            laborRate: 75,
-                                                            items: [],
-                                                            contractValue: 0
-                                                        };
-                                                        setProjects([...projects, newProject]);
-                                                    }
-                                                }}
-                                                className="w-full py-2 border-2 border-dashed border-slate-300 rounded-lg text-slate-400 text-sm font-bold hover:border-blue-400 hover:text-blue-500 hover:bg-white transition flex items-center justify-center gap-2"
-                                            >
-                                                <Plus className="w-4 h-4" /> Add Project
-                                            </button>
-                                        )}
                                     </div>
                                 </div>
                             );
@@ -507,7 +466,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                 </div>
             )}
 
-            {/* --- LEADS VIEW --- */}
             {activeTab === 'leads' && (
                 <div className="flex-1 flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                     <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
@@ -547,29 +505,10 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                         </td>
                                         <td className="px-6 py-4 font-bold text-slate-900">{lead.name}</td>
                                         <td className="px-6 py-4 text-slate-600">{lead.email}</td>
-                                        <td className="px-6 py-4 text-slate-500 text-xs max-w-xs truncate" title={lead.notes}>{lead.notes}</td>
+                                        <td className="px-6 py-4 text-slate-500 text-xs max-w-xs truncate">{lead.notes}</td>
                                         <td className="px-6 py-4 flex justify-center gap-2">
-                                            <button 
-                                                onClick={() => handleForwardLead(lead)} 
-                                                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded" 
-                                                title="Forward to Simon"
-                                            >
-                                                <ArrowRight className="w-4 h-4" />
-                                            </button>
-                                            <button 
-                                                onClick={() => convertToOpportunity(lead)} 
-                                                className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded" 
-                                                title="Convert to Project (Draft)"
-                                            >
-                                                <CheckCircle className="w-4 h-4" />
-                                            </button>
-                                            <button 
-                                                onClick={() => discardLead(lead.id)} 
-                                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded" 
-                                                title="Discard"
-                                            >
-                                                <XCircle className="w-4 h-4" />
-                                            </button>
+                                            <button onClick={() => convertToOpportunity(lead)} className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded" title="Convert to Project"><CheckCircle className="w-4 h-4" /></button>
+                                            <button onClick={() => discardLead(lead.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded" title="Discard"><XCircle className="w-4 h-4" /></button>
                                         </td>
                                     </tr>
                                 ))}
@@ -579,10 +518,8 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                 </div>
             )}
 
-            {/* --- FOLLOW UP (CLIENT DASHBOARD) VIEW --- */}
             {activeTab === 'followup' && (
                 <div className="flex-1 flex flex-col md:flex-row gap-6 h-full overflow-hidden">
-                    {/* LEFT: Client List */}
                     <div className="w-full md:w-1/3 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
                         <div className="p-4 border-b border-slate-100 bg-slate-50">
                             <h3 className="font-bold text-slate-800 text-sm">Active Clients</h3>
@@ -597,7 +534,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                 >
                                     <div className="flex justify-between items-start mb-1">
                                         <span className="font-bold text-slate-800 text-sm">{client.name}</span>
-                                        {client.hasUrgent && <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" title="Follow Up Due"></span>}
+                                        {client.hasUrgent && <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse"></span>}
                                     </div>
                                     <div className="flex justify-between items-center text-xs text-slate-500">
                                         <span>{client.sentCount} Active Estimates</span>
@@ -605,86 +542,38 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                     </div>
                                 </div>
                             ))}
-                            {clientGroups.length === 0 && <p className="text-center p-6 text-slate-400 text-sm">No active clients found in this period.</p>}
                         </div>
                     </div>
 
-                    {/* RIGHT: Client Details & Projects */}
                     <div className="w-full md:w-2/3 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
                         {selectedClientData ? (
                             <div className="flex flex-col h-full">
-                                {/* Header */}
                                 <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                                     <div>
                                         <h2 className="text-xl font-bold text-slate-900">{selectedClientData.name}</h2>
                                         <div className="flex items-center gap-4 mt-1 text-sm text-slate-500">
                                             <span className="flex items-center gap-1"><Mail className="w-3 h-3"/> {selectedClientData.email}</span>
-                                            <span className="flex items-center gap-1"><DollarSign className="w-3 h-3"/> Total Pipeline: ${selectedClientData.totalValue.toLocaleString()}</span>
+                                            <span className="flex items-center gap-1"><DollarSign className="w-3 h-3"/> Pipeline: ${selectedClientData.totalValue.toLocaleString()}</span>
                                         </div>
                                     </div>
-                                    <button 
-                                        onClick={() => generateDraft(selectedClientData)}
-                                        className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 flex items-center gap-2 shadow-sm"
-                                    >
-                                        <MessageSquare className="w-4 h-4" /> Draft Follow-up
-                                    </button>
+                                    <button onClick={() => generateDraft(selectedClientData)} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 flex items-center gap-2 shadow-sm"><MessageSquare className="w-4 h-4" /> Draft Follow-up</button>
                                 </div>
-
-                                {/* Project List */}
                                 <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                                    <h3 className="font-bold text-slate-800 text-sm uppercase flex items-center gap-2">
-                                        <FileText className="w-4 h-4 text-slate-500" /> Client Projects (In Period)
-                                    </h3>
-                                    
-                                    {selectedClientData.projects.length === 0 ? (
-                                        <p className="text-slate-400 text-sm italic">No projects found for this client in the selected period.</p>
-                                    ) : (
-                                        <div className="space-y-3">
-                                            {selectedClientData.projects.sort((a,b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime()).map(project => (
-                                                <div key={project.id} className="border border-slate-200 rounded-xl p-4 hover:shadow-md transition bg-white group">
-                                                    <div className="flex justify-between items-start mb-2">
-                                                        <div>
-                                                            <h4 className="font-bold text-slate-900">{project.name}</h4>
-                                                            <p className="text-xs text-slate-500">{project.address}</p>
-                                                        </div>
-                                                        <span className={`text-xs px-2 py-1 rounded-full font-bold ${
-                                                            project.status === 'Sent' ? 'bg-blue-100 text-blue-700' :
-                                                            project.status === 'Won' ? 'bg-emerald-100 text-emerald-700' :
-                                                            project.status === 'Lost' ? 'bg-red-100 text-red-700' :
-                                                            'bg-slate-100 text-slate-600'
-                                                        }`}>
-                                                            {project.status}
-                                                        </span>
-                                                    </div>
-                                                    
-                                                    <div className="flex items-center gap-4 text-sm text-slate-600 mt-3 border-t border-slate-50 pt-3">
-                                                        <span className="flex items-center gap-1 font-bold"><DollarSign className="w-3 h-3 text-slate-400"/> {(project.contractValue || 0).toLocaleString()}</span>
-                                                        <span className="flex items-center gap-1"><Calendar className="w-3 h-3 text-slate-400"/> Sent: {new Date(project.dateCreated).toLocaleDateString()}</span>
-                                                        {project.followUpDate && (
-                                                            <span className={`flex items-center gap-1 ${new Date() > new Date(project.followUpDate) && project.status === 'Sent' ? 'text-orange-600 font-bold' : ''}`}>
-                                                                <Clock className="w-3 h-3"/> Follow Up: {new Date(project.followUpDate).toLocaleDateString()}
-                                                            </span>
-                                                        )}
-                                                    </div>
-
-                                                    {/* Quick Actions */}
-                                                    {project.status === 'Sent' && (
-                                                        <div className="mt-4 flex gap-2">
-                                                            <button onClick={() => updateStatus(project.id, 'Won')} className="flex-1 bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-100 py-1.5 rounded text-xs font-bold flex items-center justify-center gap-1 transition">
-                                                                <CheckSquare className="w-3 h-3" /> Mark Won
-                                                            </button>
-                                                            <button onClick={() => updateStatus(project.id, 'Lost')} className="flex-1 bg-red-50 text-red-700 border border-red-100 hover:bg-red-100 py-1.5 rounded text-xs font-bold flex items-center justify-center gap-1 transition">
-                                                                <XCircle className="w-3 h-3" /> Mark Lost
-                                                            </button>
-                                                            <button onClick={() => generateDraft({ ...selectedClientData, projects: [project] })} className="flex-1 bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 py-1.5 rounded text-xs font-bold flex items-center justify-center gap-1 transition">
-                                                                <Mail className="w-3 h-3" /> Email
-                                                            </button>
-                                                        </div>
-                                                    )}
+                                    {selectedClientData.projects.map(project => (
+                                        <div key={project.id} className="border border-slate-200 rounded-xl p-4 hover:shadow-md transition bg-white group">
+                                            <div className="flex justify-between items-start mb-2">
+                                                <div>
+                                                    <h4 className="font-bold text-slate-900">{project.name}</h4>
+                                                    <p className="text-xs text-slate-500">{project.address}</p>
                                                 </div>
-                                            ))}
+                                                <span className={`text-xs px-2 py-1 rounded-full font-bold ${project.status === 'Sent' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>{project.status}</span>
+                                            </div>
+                                            <div className="flex items-center gap-4 text-sm text-slate-600 mt-3 border-t border-slate-50 pt-3">
+                                                <span className="font-bold text-slate-700">${(project.contractValue || 0).toLocaleString()}</span>
+                                                <span className="text-xs">Sent: {new Date(project.dateCreated).toLocaleDateString()}</span>
+                                            </div>
                                         </div>
-                                    )}
+                                    ))}
                                 </div>
                             </div>
                         ) : (
@@ -693,83 +582,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                 <p>Select a client to view details</p>
                             </div>
                         )}
-                    </div>
-                </div>
-            )}
-
-            {/* --- EMAIL DASHBOARD VIEW --- */}
-            {activeTab === 'email' && (
-                <div className="flex-1 flex flex-col md:flex-row gap-6 h-full overflow-hidden">
-                    <div className="w-full md:w-1/3 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col">
-                        <div className="p-4 border-b border-slate-100 font-bold text-slate-800">Recipients</div>
-                        <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
-                            {allClients.map((c, i) => (
-                                <div 
-                                    key={i} 
-                                    onClick={() => setEmailTo(c.email!)}
-                                    className={`p-3 rounded-lg border cursor-pointer hover:bg-blue-50 transition ${emailTo === c.email ? 'bg-blue-50 border-blue-200' : 'border-slate-100'}`}
-                                >
-                                    <div className="font-bold text-sm text-slate-800">{c.name}</div>
-                                    <div className="text-xs text-slate-500 truncate">{c.email}</div>
-                                </div>
-                            ))}
-                            {allClients.length === 0 && <p className="text-center text-slate-400 text-sm py-8">No clients found.</p>}
-                        </div>
-                    </div>
-                    <div className="w-full md:w-2/3 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col p-6">
-                        <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                             <Mail className="w-5 h-5 text-blue-600" /> Compose Email
-                        </h3>
-                        <div className="space-y-4 flex-1 flex flex-col">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">To</label>
-                                <input 
-                                    value={emailTo} 
-                                    onChange={(e) => setEmailTo(e.target.value)} 
-                                    className="w-full border border-slate-200 rounded-lg p-2 text-sm" 
-                                    placeholder="recipient@example.com"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Subject</label>
-                                <input 
-                                    value={emailSubject} 
-                                    onChange={(e) => setEmailSubject(e.target.value)} 
-                                    className="w-full border border-slate-200 rounded-lg p-2 text-sm" 
-                                    placeholder="Project Update..."
-                                />
-                            </div>
-                            <div className="flex-1 flex flex-col">
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Message</label>
-                                <textarea 
-                                    value={emailBody} 
-                                    onChange={(e) => setEmailBody(e.target.value)} 
-                                    className="w-full border border-slate-200 rounded-lg p-3 text-sm flex-1 resize-none focus:ring-2 focus:ring-blue-500 outline-none" 
-                                    placeholder="Type your message here..."
-                                ></textarea>
-                            </div>
-                            <div className="flex justify-between items-center pt-2">
-                                <div className="text-xs text-slate-400 flex items-center gap-1">
-                                    {clientId ? <span className="text-emerald-600 font-bold flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Outlook Connected</span> : <span>Using Default Mail App</span>}
-                                </div>
-                                <div className="flex gap-2">
-                                    <button 
-                                        onClick={() => window.open(`mailto:${emailTo}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`)}
-                                        className="text-slate-500 hover:text-blue-600 px-4 py-2 text-sm font-bold flex items-center gap-2"
-                                    >
-                                        <ExternalLink className="w-4 h-4" /> Open App
-                                    </button>
-                                    <button 
-                                        onClick={handleSendEmail} 
-                                        disabled={isSending}
-                                        className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-                                    >
-                                        {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                                        Send Email
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
                     </div>
                 </div>
             )}

@@ -10,7 +10,8 @@ import { PriceAnalysis } from './components/PriceAnalysis';
 import { AIAssistant } from './components/AIAssistant';
 import { SharePointConnect } from './components/SharePointConnect';
 import { ViewState, User, ProjectEstimate, MaterialItem, ServiceTicket, Lead, PurchaseRecord, AuditLog } from './types';
-import { getAllPurchaseRecords } from './services/sharepointService';
+import { robustParseDate } from './utils/purchaseData';
+import { Calendar, Filter } from 'lucide-react';
 
 const RESET_APP = false;
 
@@ -22,13 +23,10 @@ const loadState = <T,>(key: string, fallback: T): T => {
 };
 
 export const App: React.FC = () => {
-    useEffect(() => {
-        console.log("Carsan Electric App v11.0 - Dashboard Restore");
-    }, []);
-
     const [user, setUser] = useState<User | null>(null);
     const [currentView, setCurrentView] = useState<ViewState>(ViewState.DASHBOARD);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [dashboardFilter, setDashboardFilter] = useState<'YTD' | 'ALL'>('YTD');
 
     const [projects, setProjects] = useState<ProjectEstimate[]>(() => loadState('carsan_projects', []));
     const [materials, setMaterials] = useState<MaterialItem[]>(() => loadState('carsan_materials', []));
@@ -74,45 +72,83 @@ export const App: React.FC = () => {
             case ViewState.DASHBOARD:
                 return (
                     <div className="p-4 md:p-8 max-w-7xl mx-auto">
-                        <h1 className="text-3xl font-bold mb-6 text-slate-900">Command Center</h1>
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                            <div>
+                                <h1 className="text-3xl font-bold text-slate-900">Command Center</h1>
+                                <p className="text-slate-500">Business overview and active operational status.</p>
+                            </div>
+                            <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-slate-200 shadow-sm">
+                                <button 
+                                    onClick={() => setDashboardFilter('YTD')}
+                                    className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${dashboardFilter === 'YTD' ? 'bg-blue-600 text-white shadow' : 'text-slate-500 hover:bg-slate-50'}`}
+                                >
+                                    Year to Date ({currentYear})
+                                </button>
+                                <button 
+                                    onClick={() => setDashboardFilter('ALL')}
+                                    className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${dashboardFilter === 'ALL' ? 'bg-blue-600 text-white shadow' : 'text-slate-500 hover:bg-slate-50'}`}
+                                >
+                                    All Time
+                                </button>
+                            </div>
+                        </div>
                         
                         {/* 1. Revenue Overview */}
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Revenue Won ({currentYear})</h3>
+                                <h3 className="text-slate-500 font-bold uppercase text-[10px] tracking-wider mb-2">Revenue Won</h3>
                                 <p className="text-2xl font-bold text-emerald-600">
                                     ${projects
-                                        .filter(p => p.status === 'Won' && new Date(p.awardedDate || p.dateCreated).getFullYear() === currentYear)
+                                        .filter(p => {
+                                            const matchesStatus = p.status === 'Won';
+                                            const date = robustParseDate(p.awardedDate || p.dateCreated);
+                                            return matchesStatus && (dashboardFilter === 'ALL' || date.getFullYear() === currentYear);
+                                        })
                                         .reduce((sum, p) => sum + (p.contractValue || 0), 0).toLocaleString()}
                                 </p>
+                                <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">{dashboardFilter === 'YTD' ? `Jan - Dec ${currentYear}` : 'Cumulative'}</p>
                             </div>
                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Pipeline ({currentYear})</h3>
+                                <h3 className="text-slate-500 font-bold uppercase text-[10px] tracking-wider mb-2">Pipeline</h3>
                                 <p className="text-2xl font-bold text-blue-600">
                                     ${projects
-                                        .filter(p => (p.status === 'Draft' || p.status === 'Sent') && new Date(p.dateCreated).getFullYear() === currentYear)
+                                        .filter(p => {
+                                            const matchesStatus = p.status === 'Draft' || p.status === 'Sent';
+                                            const date = robustParseDate(p.dateCreated);
+                                            return matchesStatus && (dashboardFilter === 'ALL' || date.getFullYear() === currentYear);
+                                        })
                                         .reduce((sum, p) => sum + (p.contractValue || 0), 0).toLocaleString()}
                                 </p>
+                                <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">Unconverted Opportunities</p>
                             </div>
                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Service Revenue ({currentYear})</h3>
+                                <h3 className="text-slate-500 font-bold uppercase text-[10px] tracking-wider mb-2">Service Revenue</h3>
                                 <p className="text-2xl font-bold text-indigo-600">
                                     ${tickets
-                                        .filter(t => (t.status === 'Authorized' || t.status === 'Completed') && new Date(t.dateCreated).getFullYear() === currentYear)
+                                        .filter(t => {
+                                            const matchesStatus = t.status === 'Authorized' || t.status === 'Completed';
+                                            const date = robustParseDate(t.dateCreated);
+                                            return matchesStatus && (dashboardFilter === 'ALL' || date.getFullYear() === currentYear);
+                                        })
                                         .reduce((sum, t) => {
-                                        const mat = t.items.reduce((s, i) => s + (i.quantity * i.unitMaterialCost), 0);
-                                        const lab = t.items.reduce((s, i) => s + (i.quantity * i.unitLaborHours * t.laborRate), 0);
-                                        return sum + mat + lab;
-                                    }, 0).toLocaleString()}
+                                            const mat = t.items.reduce((s, i) => s + (i.quantity * i.unitMaterialCost), 0);
+                                            const lab = t.items.reduce((s, i) => s + (i.quantity * i.unitLaborHours * t.laborRate), 0);
+                                            return sum + mat + lab;
+                                        }, 0).toLocaleString()}
                                 </p>
+                                <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">Change Orders & Service</p>
                             </div>
                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                                <h3 className="text-slate-500 font-bold uppercase text-xs mb-2">Purchase Spend ({currentYear})</h3>
+                                <h3 className="text-slate-500 font-bold uppercase text-[10px] tracking-wider mb-2">Purchase Spend</h3>
                                 <p className="text-2xl font-bold text-slate-700">
                                     ${purchases
-                                        .filter(p => new Date(p.date).getFullYear() === currentYear)
+                                        .filter(p => {
+                                            const date = robustParseDate(p.date);
+                                            return (dashboardFilter === 'ALL' || date.getFullYear() === currentYear);
+                                        })
                                         .reduce((sum, p) => sum + (p.totalCost || 0), 0).toLocaleString()}
                                 </p>
+                                <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">Materials & Direct Costs</p>
                             </div>
                         </div>
 
@@ -120,9 +156,12 @@ export const App: React.FC = () => {
                             
                             {/* 2. Action Items (Follow Ups) */}
                             <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                                <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                                    <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse"></span> Projects Due for Follow-Up
-                                </h3>
+                                <div className="flex justify-between items-center mb-6">
+                                    <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                                        <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse"></span> Projects Due for Follow-Up
+                                    </h3>
+                                    <span className="text-xs text-slate-400 font-medium">Auto-generated from Est. Pipeline</span>
+                                </div>
                                 <div className="space-y-3">
                                     {projects
                                         .filter(p => p.followUpDate && new Date(p.followUpDate) <= new Date() && !['Won', 'Lost', 'Completed'].includes(p.status))
