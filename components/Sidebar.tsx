@@ -208,7 +208,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isO
           >
             {currentView === ViewState.PRICE_ANALYSIS && <div className="absolute left-0 top-3 bottom-3 w-1 bg-blue-500 rounded-r-full" />}
             <BarChart2 className={`w-5 h-5 ${currentView === ViewState.PRICE_ANALYSIS ? 'text-blue-400' : 'text-slate-500 group-hover:text-blue-400'}`} />
-            <span>Financial Suite</span>
+            <span>Price Analysis</span>
           </button>
 
           <button

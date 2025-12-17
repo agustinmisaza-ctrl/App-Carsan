@@ -1,7 +1,8 @@
+
 import React, { useState, useMemo } from 'react';
 import { Lead, ProjectEstimate } from '../types';
 import { fetchOutlookEmails, sendOutlookEmail, getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId } from '../services/emailIntegration';
-import { Mail, RefreshCw, Settings, User as UserIcon, Phone, Search, Save, Loader2, Trello, List, ArrowRight, CheckCircle, XCircle, DollarSign, Plus, ArrowUpRight, ArrowDownRight, Trophy, AlertCircle, Trash2, Send, ExternalLink, Users, Calendar, Clock, FileText, CheckSquare, MessageSquare, Filter } from 'lucide-react';
+import { Mail, RefreshCw, Settings, User as UserIcon, Phone, Search, Save, Loader2, Trello, List, ArrowRight, CheckCircle, XCircle, DollarSign, Plus, ArrowUpRight, ArrowDownRight, Trophy, AlertCircle, Trash2, Send, ExternalLink, Users, Calendar, Clock, FileText, CheckSquare, MessageSquare, Filter, Percent } from 'lucide-react';
 import { robustParseDate } from '../utils/purchaseData';
 
 interface CRMProps {
@@ -40,7 +41,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
     });
 
     // --- CENTRALIZED FILTERING LOGIC ---
-    // Filter Projects by Date Created (or Awarded Date for financial tracking)
     const filteredProjects = useMemo(() => {
         const start = robustParseDate(dateFilter.start).getTime();
         const end = robustParseDate(dateFilter.end).getTime() + (24 * 60 * 60 * 1000) - 1;
@@ -67,6 +67,11 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
     const wonInPeriod = filteredProjects.filter(p => p.status === 'Won').reduce((sum, p) => sum + (p.contractValue || 0), 0);
     const lostInPeriod = filteredProjects.filter(p => p.status === 'Lost').reduce((sum, p) => sum + (p.contractValue || 0), 0);
     
+    // Win Rate calculation based on counts
+    const deliveredCount = filteredProjects.filter(p => p.status !== 'Draft').length;
+    const wonCount = filteredProjects.filter(p => ['Won', 'Ongoing', 'Completed', 'Finalized'].includes(p.status)).length;
+    const winRate = deliveredCount > 0 ? (wonCount / deliveredCount) * 100 : 0;
+
     const sentLastPeriod = 100000; 
     const wonLastPeriod = 50000;
 
@@ -253,11 +258,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
         window.open(`mailto:simon.martinez@carsanelectric.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
     };
 
-    const allClients = Array.from(new Set([
-        ...projects.map(p => ({ name: p.client, email: p.contactInfo })),
-        ...leads.map(l => ({ name: l.name, email: l.email }))
-    ])).filter(c => c.name && c.email);
-
     return (
         <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6 h-full flex flex-col">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 shrink-0">
@@ -338,12 +338,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                     >
                         This Year
                     </button>
-                    <button 
-                        onClick={() => setDateFilter({ start: '2020-01-01', end: `${new Date().getFullYear() + 1}-12-31` })}
-                        className="text-xs font-bold text-slate-500 hover:bg-slate-100 px-3 py-2 rounded-lg whitespace-nowrap"
-                    >
-                        All Time
-                    </button>
                 </div>
             </div>
 
@@ -384,7 +378,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                 </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
                     <div className="absolute right-0 top-0 p-4 opacity-10"><DollarSign className="w-16 h-16 text-blue-500" /></div>
                     <p className="text-xs font-bold text-slate-400 uppercase">Total Quoted (Period)</p>
@@ -401,6 +395,14 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                     <div className={`flex items-center gap-1 text-xs font-bold mt-2 ${calcGrowth(wonInPeriod, wonLastPeriod) >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
                         {calcGrowth(wonInPeriod, wonLastPeriod) >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
                         {Math.abs(calcGrowth(wonInPeriod, wonLastPeriod)).toFixed(1)}% vs Prev Period
+                    </div>
+                </div>
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
+                    <div className="absolute right-0 top-0 p-4 opacity-10"><Percent className="w-16 h-16 text-indigo-500" /></div>
+                    <p className="text-xs font-bold text-slate-400 uppercase">Win Rate (Wins/Delivered)</p>
+                    <p className="text-2xl font-bold text-indigo-600 mt-1">{winRate.toFixed(1)}%</p>
+                    <div className="flex items-center gap-1 text-xs font-bold mt-2 text-slate-500">
+                        {wonCount} Wins / {deliveredCount} Delivered
                     </div>
                 </div>
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
