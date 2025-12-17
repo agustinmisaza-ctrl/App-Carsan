@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { PurchaseRecord, MaterialItem, ProjectEstimate, ServiceTicket } from '../types';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell, ReferenceLine, Scatter, AreaChart, Area } from 'recharts';
-import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, PieChart, Sparkles, ListFilter, Flame, AlertTriangle, Trash2, Plus, Save, Briefcase, Wallet, RefreshCw } from 'lucide-react';
+import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, PieChart, Sparkles, ListFilter, Flame, AlertTriangle, Trash2, Plus, Save, Briefcase, Wallet, RefreshCw, Calendar } from 'lucide-react';
 import { extractInvoiceData } from '../services/geminiService';
 import * as XLSX from 'xlsx';
 import { parseCurrency, normalizeSupplier } from '../utils/purchaseData';
@@ -22,6 +22,13 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
   const [selectedProject, setSelectedProject] = useState<string>('All');
   const [sortByValue, setSortByValue] = useState(true);
   
+  // Date Filter State
+  const currentYear = new Date().getFullYear();
+  const [dateRange, setDateRange] = useState({
+      start: `${currentYear}-01-01`,
+      end: `${currentYear}-12-31`
+  });
+  
   // Data Entry State
   const [isExtracting, setIsExtracting] = useState(false);
   const [uploadFileName, setUploadFileName] = useState<string | null>(null);
@@ -41,15 +48,44 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
   const [notification, setNotification] = useState<{ type: 'success' | 'error', message: string } | null>(null);
   const [showMobileSelector, setShowMobileSelector] = useState(false); 
 
-  // --- FINANCIAL CALCULATIONS ---
+  // --- FILTERED DATA (By Date) ---
+  const filteredData = useMemo(() => {
+      const start = new Date(dateRange.start);
+      const end = new Date(dateRange.end);
+      end.setHours(23, 59, 59, 999); // End of day
 
+      const isValidDate = (d: any) => d instanceof Date && !isNaN(d.getTime());
+
+      const filteredPurchases = purchases.filter(p => {
+          const d = new Date(p.date);
+          return isValidDate(d) ? d >= start && d <= end : false;
+      });
+
+      const filteredProjects = projects.filter(p => {
+          // Use awardedDate for revenue if available, otherwise createdDate
+          const dateStr = p.awardedDate || p.dateCreated;
+          const d = new Date(dateStr);
+          return isValidDate(d) ? d >= start && d <= end : false;
+      });
+
+      const filteredTickets = tickets.filter(t => {
+          const d = new Date(t.dateCreated);
+          return isValidDate(d) ? d >= start && d <= end : false;
+      });
+
+      return { purchases: filteredPurchases, projects: filteredProjects, tickets: filteredTickets };
+  }, [purchases, projects, tickets, dateRange]);
+
+  // --- FINANCIAL CALCULATIONS (Using Filtered Data) ---
   const financialData = useMemo(() => {
+      const { projects: pList, tickets: tList, purchases: purList } = filteredData;
+
       // 1. Revenue
-      const projectRevenue = projects
+      const projectRevenue = pList
           .filter(p => ['Won', 'Ongoing', 'Completed'].includes(p.status))
           .reduce((sum, p) => sum + (p.contractValue || 0), 0);
 
-      const serviceRevenue = tickets
+      const serviceRevenue = tList
           .filter(t => ['Authorized', 'Completed'].includes(t.status))
           .reduce((sum, t) => {
               const mat = t.items.reduce((s, i) => s + (i.quantity * i.unitMaterialCost), 0);
@@ -59,16 +95,16 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
 
       const totalRevenue = projectRevenue + serviceRevenue;
 
-      // 2. Expenses (Actuals)
-      const materialExpense = purchases.reduce((sum, p) => sum + p.totalCost, 0);
+      // 2. Expenses (Actuals from Purchases within Period)
+      const materialExpense = purList.reduce((sum, p) => sum + p.totalCost, 0);
       
       const laborCostBasis = 0.4; 
       
-      const projectLaborRev = projects
+      const projectLaborRev = pList
         .filter(p => ['Won', 'Ongoing', 'Completed'].includes(p.status))
         .reduce((sum, p) => sum + p.items.reduce((s, i) => s + (i.quantity * i.unitLaborHours * p.laborRate), 0), 0);
       
-      const ticketLaborRev = tickets
+      const ticketLaborRev = tList
         .filter(t => ['Authorized', 'Completed'].includes(t.status))
         .reduce((sum, t) => sum + t.items.reduce((s, i) => s + (i.quantity * i.unitLaborHours * t.laborRate), 0), 0);
 
@@ -80,15 +116,17 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
       const margin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
 
       return { totalRevenue, totalExpenses, netProfit, margin, projectRevenue, serviceRevenue, materialExpense, totalLaborExpense };
-  }, [projects, tickets, purchases]);
+  }, [filteredData]);
 
-  // --- JOB COSTING LOGIC ---
+  // --- JOB COSTING LOGIC (Project Lifetime - NOT filtered by date range usually, but sorting by Margin) ---
+  // Note: Job costing usually requires looking at the WHOLE project history, not just this year's transactions.
+  // We will keep using the raw `purchases` and `projects` for this specific view to ensure accuracy of "Project Profitability".
   const jobCostingData = useMemo(() => {
-      // Get all active projects
+      // Get all active projects (unfiltered by date to show full project lifecycle)
       const activeProjects = projects.filter(p => ['Won', 'Ongoing', 'Completed'].includes(p.status));
       
       return activeProjects.map(proj => {
-          // Actual Material Spend
+          // Actual Material Spend (All time for this project)
           const actualMaterial = purchases
             .filter(p => p.projectName === proj.name)
             .reduce((sum, p) => sum + p.totalCost, 0);
@@ -117,10 +155,11 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
       }).sort((a, b) => a.margin - b.margin); // Sort by lowest margin first (problem areas)
   }, [projects, purchases]);
 
-  // --- PURCHASING ANALYSIS LOGIC ---
+  // --- PURCHASING ANALYSIS LOGIC (Filtered by Date) ---
   const processedItemsList = useMemo(() => {
       const itemMap = new Map<string, { total: number, count: number }>();
-      purchases.forEach(p => {
+      // Use filtered purchases here
+      filteredData.purchases.forEach(p => {
           const name = p.itemDescription || 'Unknown';
           if (!itemMap.has(name)) itemMap.set(name, { total: 0, count: 0 });
           const curr = itemMap.get(name)!;
@@ -145,7 +184,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
       }
 
       return items;
-  }, [purchases, searchTerm, sortByValue]);
+  }, [filteredData.purchases, searchTerm, sortByValue]);
 
   const paretoCutoffIndex = Math.floor(processedItemsList.length * 0.2);
 
@@ -154,20 +193,21 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
       setTimeout(() => setNotification(null), 5000);
   };
 
-  const filteredPurchases = useMemo(() => {
-      return purchases.filter(p => {
+  // Used for the Purchasing Tab List
+  const filteredPurchasesList = useMemo(() => {
+      return filteredData.purchases.filter(p => {
           const matchesSearch = p.itemDescription.toLowerCase().includes(searchTerm.toLowerCase()) || 
                                 p.poNumber.toLowerCase().includes(searchTerm.toLowerCase());
           const matchesProject = selectedProject === 'All' || p.projectName === selectedProject;
           return matchesSearch && matchesProject;
       });
-  }, [purchases, searchTerm, selectedProject]);
+  }, [filteredData.purchases, searchTerm, selectedProject]);
 
   const supplierScorecard = useMemo(() => {
-      if (purchases.length === 0) return [];
+      if (filteredData.purchases.length === 0) return [];
       const itemStats: Record<string, { totalCost: number, count: number, avg: number }> = {};
       
-      purchases.forEach(p => {
+      filteredData.purchases.forEach(p => {
           const key = p.itemDescription.trim().toLowerCase();
           if (!itemStats[key]) itemStats[key] = { totalCost: 0, count: 0, avg: 0 };
           itemStats[key].totalCost += p.unitCost;
@@ -180,7 +220,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
 
       const supplierStats: Record<string, { totalVariancePct: number, itemsCount: number }> = {};
 
-      purchases.forEach(p => {
+      filteredData.purchases.forEach(p => {
           const key = p.itemDescription.trim().toLowerCase();
           const marketAvg = itemStats[key].avg;
           const normalizedSupplier = normalizeSupplier(p.supplier);
@@ -204,11 +244,11 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
       })
       .filter(s => s.itemsCount > 2)
       .sort((a, b) => a.score - b.score);
-  }, [purchases]);
+  }, [filteredData.purchases]);
 
   const itemSupplierStats = useMemo(() => {
         if (!selectedItem) return [];
-        const relevant = purchases.filter(p => p.itemDescription === selectedItem);
+        const relevant = filteredData.purchases.filter(p => p.itemDescription === selectedItem);
         const groups: Record<string, { total: number, count: number, min: number, max: number }> = {};
         
         relevant.forEach(r => {
@@ -226,8 +266,8 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
             minPrice: stats.min,
             maxPrice: stats.max,
             count: stats.count
-        })).sort((a,b) => a.avgPrice - b.avgPrice); // Cheapest first
-  }, [purchases, selectedItem]);
+        })).sort((a,b) => a.avgPrice - b.avgPrice); 
+  }, [filteredData.purchases, selectedItem]);
 
   // --- HANDLERS ---
 
@@ -277,11 +317,9 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                         const qty = Number(row['Quantity'] || row['Qty'] || 0);
                         const unit = parseCurrency(String(row['Unit Cost'] || row['Cost'] || row['Price'] || 0));
                         
-                        // FIX: Correct Date Parsing for Excel Serial Dates
                         let finalDate = new Date().toISOString();
                         const val = row['Date'];
                         if (typeof val === 'number') {
-                            // Excel serial date to JS date
                             finalDate = new Date(Math.round((val - 25569) * 86400 * 1000)).toISOString();
                         } else if (typeof val === 'string') {
                             const d = new Date(val);
@@ -401,6 +439,42 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
         </div>
       </div>
 
+      {/* --- FINANCIAL DATE FILTER BAR --- */}
+      {(activeTab === 'overview' || activeTab === 'purchasing') && (
+          <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 items-center">
+              <div className="flex items-center gap-2 text-slate-500 text-sm font-bold uppercase mr-2">
+                  <Calendar className="w-4 h-4" /> Period:
+              </div>
+              <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50">
+                  <input 
+                      type="date" 
+                      value={dateRange.start}
+                      onChange={(e) => setDateRange({...dateRange, start: e.target.value})}
+                      className="bg-transparent text-sm font-medium text-slate-700 outline-none"
+                  />
+                  <span className="text-slate-400">-</span>
+                  <input 
+                      type="date" 
+                      value={dateRange.end}
+                      onChange={(e) => setDateRange({...dateRange, end: e.target.value})}
+                      className="bg-transparent text-sm font-medium text-slate-700 outline-none"
+                  />
+              </div>
+              <button 
+                  onClick={() => setDateRange({ start: `${currentYear}-01-01`, end: `${currentYear}-12-31` })}
+                  className="text-xs font-bold text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg border border-transparent hover:border-blue-100"
+              >
+                  This Year
+              </button>
+              <button 
+                  onClick={() => setDateRange({ start: '2020-01-01', end: `${currentYear + 1}-12-31` })}
+                  className="text-xs font-bold text-slate-500 hover:bg-slate-100 px-3 py-1.5 rounded-lg border border-transparent hover:border-slate-200"
+              >
+                  All Time
+              </button>
+          </div>
+      )}
+
       {/* --- FINANCIAL OVERVIEW TAB --- */}
       {activeTab === 'overview' && (
           <div className="space-y-6">
@@ -468,7 +542,10 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
       {activeTab === 'job-costing' && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
               <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-                  <h3 className="font-bold text-slate-800 flex items-center gap-2"><Briefcase className="w-5 h-5 text-slate-500"/> Project Profitability</h3>
+                  <div className="flex flex-col">
+                      <h3 className="font-bold text-slate-800 flex items-center gap-2"><Briefcase className="w-5 h-5 text-slate-500"/> Project Profitability</h3>
+                      <p className="text-[10px] text-slate-400 mt-1 ml-7">Lifetime data for active projects (Not filtered by date)</p>
+                  </div>
                   <div className="text-xs text-slate-500 italic">*Labor Cost Estimated at 40% of Billed Labor</div>
               </div>
               <div className="overflow-x-auto">
@@ -512,7 +589,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
       {activeTab === 'purchasing' && (
           <div className="space-y-6">
               <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 items-center">
-                  <div className="flex items-center gap-2 text-slate-500 text-sm font-bold uppercase mr-2"><Filter className="w-4 h-4" /> Filters:</div>
+                  <div className="flex items-center gap-2 text-slate-500 text-sm font-bold uppercase mr-2"><Filter className="w-4 h-4" /> Item Filters:</div>
                   <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                       <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search Item or PO..." className="pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm w-48" />
@@ -526,7 +603,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
               {!selectedItem && supplierScorecard.length > 0 && (
                   <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-6">
                       <div className="flex items-center justify-between mb-4">
-                          <h3 className="font-bold text-slate-800 flex items-center gap-2"><Award className="w-5 h-5 text-purple-500" /> Supplier Competitiveness</h3>
+                          <h3 className="font-bold text-slate-800 flex items-center gap-2"><Award className="w-5 h-5 text-purple-500" /> Supplier Competitiveness (In Period)</h3>
                       </div>
                       <div className="h-64 w-full">
                           <ResponsiveContainer width="100%" height="100%">
@@ -585,13 +662,13 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
                                   <div className="flex justify-between items-start mb-4">
                                       <div>
                                           <h3 className="font-bold text-slate-800 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-blue-500" /> Price History: {selectedItem}</h3>
-                                          <p className="text-xs text-slate-500">Historical Unit Cost Trend</p>
+                                          <p className="text-xs text-slate-500">Historical Unit Cost Trend (In Period)</p>
                                       </div>
                                       <button onClick={() => setSelectedItem('')} className="text-xs text-blue-600 hover:underline">Clear Selection</button>
                                   </div>
                                   <div className="h-64 w-full">
                                       <ResponsiveContainer width="100%" height="100%">
-                                          <ComposedChart data={purchases.filter(p => p.itemDescription === selectedItem).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime())}>
+                                          <ComposedChart data={filteredData.purchases.filter(p => p.itemDescription === selectedItem).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime())}>
                                               <CartesianGrid strokeDasharray="3 3" vertical={false} />
                                               <XAxis dataKey="date" tickFormatter={(t) => new Date(t).toLocaleDateString()} fontSize={12} />
                                               <YAxis domain={['auto', 'auto']} fontSize={12} tickFormatter={(v) => `$${v}`} />

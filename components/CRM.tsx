@@ -38,31 +38,37 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
         end: `${currentYear}-12-31`
     });
 
-    // Financial KPIs with Date Filter
-    const filterProjectsByDate = (status: string) => {
-        if (!projects) return 0;
+    // --- CENTRALIZED FILTERING LOGIC ---
+    // Filter Projects by Date Created
+    const filteredProjects = useMemo(() => {
         const start = new Date(dateFilter.start);
         const end = new Date(dateFilter.end);
         end.setHours(23, 59, 59, 999); // Include end of day
 
-        return projects
-            .filter(p => {
-                const d = new Date(p.dateCreated);
-                return d >= start && d <= end;
-            })
-            .filter(p => status === 'All' || p.status === status)
-            .reduce((sum, p) => sum + (p.contractValue || 0), 0);
-    };
+        return projects.filter(p => {
+            const d = new Date(p.dateCreated);
+            return d >= start && d <= end;
+        });
+    }, [projects, dateFilter]);
 
-    const sentInPeriod = filterProjectsByDate('Sent');
-    const wonInPeriod = filterProjectsByDate('Won');
-    const lostInPeriod = filterProjectsByDate('Lost');
-    // Using previous year same period for comparison simulation (simplified)
-    const prevYearStart = new Date(dateFilter.start);
-    prevYearStart.setFullYear(prevYearStart.getFullYear() - 1);
-    const prevYearEnd = new Date(dateFilter.end);
-    prevYearEnd.setFullYear(prevYearEnd.getFullYear() - 1);
+    // Filter Leads by Date Added
+    const filteredLeads = useMemo(() => {
+        const start = new Date(dateFilter.start);
+        const end = new Date(dateFilter.end);
+        end.setHours(23, 59, 59, 999);
+
+        return leads.filter(l => {
+            const d = new Date(l.dateAdded);
+            return d >= start && d <= end;
+        });
+    }, [leads, dateFilter]);
+
+    // --- KPI CALCULATIONS (Using Filtered Data) ---
+    const sentInPeriod = filteredProjects.filter(p => p.status === 'Sent').reduce((sum, p) => sum + (p.contractValue || 0), 0);
+    const wonInPeriod = filteredProjects.filter(p => p.status === 'Won').reduce((sum, p) => sum + (p.contractValue || 0), 0);
+    const lostInPeriod = filteredProjects.filter(p => p.status === 'Lost').reduce((sum, p) => sum + (p.contractValue || 0), 0);
     
+    // Using previous year same period for comparison simulation (simplified)
     // Simplistic Growth calc
     const sentLastPeriod = 100000; // Mock base for comparison
     const wonLastPeriod = 50000;
@@ -72,7 +78,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
         return ((current - past) / past) * 100;
     };
 
-    // --- AGGREGATE CLIENT DATA FOR FOLLOW UP TAB ---
+    // --- AGGREGATE CLIENT DATA FOR FOLLOW UP TAB (Using Filtered Data) ---
     const clientGroups = useMemo(() => {
         const groups: Record<string, {
             name: string;
@@ -84,7 +90,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
             hasUrgent: boolean;
         }> = {};
 
-        projects.forEach(p => {
+        filteredProjects.forEach(p => {
             const name = p.client || 'Unknown Client';
             if (!groups[name]) {
                 groups[name] = { 
@@ -114,7 +120,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
             if (!a.hasUrgent && b.hasUrgent) return 1;
             return b.sentCount - a.sentCount; // Prioritize clients with active sent estimates
         });
-    }, [projects]);
+    }, [filteredProjects]);
 
     const selectedClientData = selectedClientName ? clientGroups.find(c => c.name === selectedClientName) : null;
 
@@ -202,7 +208,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
         setActiveTab('pipeline');
     };
 
-    const updateProjectStatus = (id: string, status: ProjectEstimate['status']) => {
+    const updateStatus = (id: string, status: ProjectEstimate['status']) => {
         if (!setProjects) return;
         const updated = projects.map(p => p.id === id ? { ...p, status } : p);
         setProjects(updated);
@@ -250,7 +256,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
         window.open(`mailto:simon.martinez@carsanelectric.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
     };
 
-    // Prepare client list for Email tab
+    // Prepare client list for Email tab (Use ALL projects for email selection, not just filtered)
     const allClients = Array.from(new Set([
         ...projects.map(p => ({ name: p.client, email: p.contactInfo })),
         ...leads.map(l => ({ name: l.name, email: l.email }))
@@ -339,6 +345,12 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                     >
                         This Year
                     </button>
+                    <button 
+                        onClick={() => setDateFilter({ start: '2020-01-01', end: `${new Date().getFullYear() + 1}-12-31` })}
+                        className="text-xs font-bold text-slate-500 hover:bg-slate-100 px-3 py-2 rounded-lg whitespace-nowrap"
+                    >
+                        All Time
+                    </button>
                 </div>
             </div>
 
@@ -413,7 +425,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                 <div className="flex-1 overflow-x-auto min-h-[500px] pb-4">
                     <div className="flex gap-4 min-w-[1000px] h-full">
                         {['Draft', 'Sent', 'Won', 'Lost'].map(stage => {
-                            const stageOpps = projects
+                            const stageOpps = filteredProjects
                                 .filter(p => p.status === stage)
                                 .filter(p => p.name.toLowerCase().includes(crmSearchTerm.toLowerCase()) || p.client.toLowerCase().includes(crmSearchTerm.toLowerCase()))
                                 .sort((a, b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime());
@@ -501,7 +513,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                     <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
                         <div className="flex items-center gap-2">
                             <h3 className="font-bold text-slate-800">Recent Leads</h3>
-                            <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full font-bold">{leads.length}</span>
+                            <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full font-bold">{filteredLeads.length}</span>
                         </div>
                         <button 
                             onClick={handleFetchLeads}
@@ -524,7 +536,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {leads
+                                {filteredLeads
                                     .filter(l => l.name.toLowerCase().includes(crmSearchTerm.toLowerCase()) || l.email.toLowerCase().includes(crmSearchTerm.toLowerCase()))
                                     .map(lead => (
                                     <tr key={lead.id} className="hover:bg-slate-50 group">
@@ -593,7 +605,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                     </div>
                                 </div>
                             ))}
-                            {clientGroups.length === 0 && <p className="text-center p-6 text-slate-400 text-sm">No active clients found.</p>}
+                            {clientGroups.length === 0 && <p className="text-center p-6 text-slate-400 text-sm">No active clients found in this period.</p>}
                         </div>
                     </div>
 
@@ -621,11 +633,11 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                 {/* Project List */}
                                 <div className="flex-1 overflow-y-auto p-6 space-y-4">
                                     <h3 className="font-bold text-slate-800 text-sm uppercase flex items-center gap-2">
-                                        <FileText className="w-4 h-4 text-slate-500" /> Client Projects
+                                        <FileText className="w-4 h-4 text-slate-500" /> Client Projects (In Period)
                                     </h3>
                                     
                                     {selectedClientData.projects.length === 0 ? (
-                                        <p className="text-slate-400 text-sm italic">No projects found for this client.</p>
+                                        <p className="text-slate-400 text-sm italic">No projects found for this client in the selected period.</p>
                                     ) : (
                                         <div className="space-y-3">
                                             {selectedClientData.projects.sort((a,b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime()).map(project => (
@@ -658,10 +670,10 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                                     {/* Quick Actions */}
                                                     {project.status === 'Sent' && (
                                                         <div className="mt-4 flex gap-2">
-                                                            <button onClick={() => updateProjectStatus(project.id, 'Won')} className="flex-1 bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-100 py-1.5 rounded text-xs font-bold flex items-center justify-center gap-1 transition">
+                                                            <button onClick={() => updateStatus(project.id, 'Won')} className="flex-1 bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-100 py-1.5 rounded text-xs font-bold flex items-center justify-center gap-1 transition">
                                                                 <CheckSquare className="w-3 h-3" /> Mark Won
                                                             </button>
-                                                            <button onClick={() => updateProjectStatus(project.id, 'Lost')} className="flex-1 bg-red-50 text-red-700 border border-red-100 hover:bg-red-100 py-1.5 rounded text-xs font-bold flex items-center justify-center gap-1 transition">
+                                                            <button onClick={() => updateStatus(project.id, 'Lost')} className="flex-1 bg-red-50 text-red-700 border border-red-100 hover:bg-red-100 py-1.5 rounded text-xs font-bold flex items-center justify-center gap-1 transition">
                                                                 <XCircle className="w-3 h-3" /> Mark Lost
                                                             </button>
                                                             <button onClick={() => generateDraft({ ...selectedClientData, projects: [project] })} className="flex-1 bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 py-1.5 rounded text-xs font-bold flex items-center justify-center gap-1 transition">
