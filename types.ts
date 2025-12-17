@@ -28,6 +28,7 @@ export interface MaterialItem {
   unit: string;
   materialCost: number;
   laborHours: number;
+  source: 'AI' | 'Real';
 }
 
 export interface EstimateLineItem {
@@ -112,8 +113,6 @@ export interface AnalysisResult {
   }[];
 }
 
-// --- PURCHASE HISTORY TYPES ---
-
 export interface PurchaseRecord {
   id: string;
   date: string;
@@ -140,8 +139,8 @@ export interface VarianceItem {
   avgPurchasedCost: number;
   totalEstimated: number;
   totalPurchased: number;
-  costVariance: number; // Positive means over budget
-  qtyVariance: number; // Positive means bought more than estimated
+  costVariance: number; 
+  qtyVariance: number; 
   status: 'OK' | 'Over Budget' | 'Over Quantity' | 'Critical' | 'Unplanned';
 }
 

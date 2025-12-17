@@ -1,7 +1,8 @@
 import { GoogleGenAI, Type, Chat, LiveServerMessage, Modality } from "@google/genai";
 import { MaterialItem, AnalysisResult, Lead, ProjectEstimate, ServiceTicket, PurchaseRecord } from "../types";
 
-const GEMINI_MODEL = "gemini-2.5-flash";
+// Adhere to coding guidelines for model selection: 'gemini-3-flash-preview' for general text tasks
+const GEMINI_MODEL = "gemini-3-flash-preview";
 const LIVE_MODEL = 'gemini-2.5-flash-native-audio-preview-09-2025';
 
 // Schema for the analysis response
@@ -138,6 +139,7 @@ export const analyzeBlueprint = async (
       }
     });
 
+    // Fix: Solely use the .text property from GenerateContentResponse
     let text = response.text || '{ "items": [] }';
     
     // Robust JSON cleaning to handle AI returning markdown blocks
@@ -183,6 +185,7 @@ export const analyzeSchedule = async (base64File: string): Promise<string> => {
                 ]
             }
         });
+        // Fix: Use the .text property directly as per Gemini API guidelines
         return response.text || "No schedule analysis available.";
     } catch (e) {
         console.error("Schedule analysis failed", e);
@@ -207,6 +210,7 @@ export const extractLeadFromText = async (text: string): Promise<Partial<Lead>> 
             }
         });
         
+        // Fix: Use the .text property directly
         let jsonStr = response.text || '{}';
         jsonStr = jsonStr.trim();
         if (jsonStr.startsWith('```')) {
@@ -262,6 +266,7 @@ export const extractInvoiceData = async (base64File: string): Promise<PurchaseRe
             }
         });
 
+        // Fix: Access response text output via the .text property
         let jsonStr = response.text || '{}';
         
         // Robust JSON cleaning to handle potential AI markdown formatting
@@ -343,6 +348,7 @@ export const generateInvoiceFromNotes = async (
             }
         });
         
+        // Fix: Access response text output via the .text property
         let text = response.text || '{ "items": [] }';
         text = text.trim();
         if (text.startsWith('```')) {
