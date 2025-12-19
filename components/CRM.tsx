@@ -93,6 +93,9 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
         }> = {};
 
         filteredProjects.forEach(p => {
+            // STRICT FILTER: Only show 'Sent' proposals in the Follow Up tab
+            if (p.status !== 'Sent') return;
+
             const name = p.client || 'Unknown Client';
             if (!groups[name]) {
                 groups[name] = { 
@@ -107,10 +110,10 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
             }
             groups[name].projects.push(p);
             groups[name].totalValue += (p.contractValue || 0);
-            if (p.status === 'Sent') groups[name].sentCount++;
+            groups[name].sentCount++;
             
             // Check urgency
-            if (p.status === 'Sent' && p.followUpDate) {
+            if (p.followUpDate) {
                 const today = new Date();
                 const followUp = new Date(p.followUpDate);
                 if (today >= followUp) groups[name].hasUrgent = true;
@@ -120,7 +123,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
         return Object.values(groups).sort((a, b) => {
             if (a.hasUrgent && !b.hasUrgent) return -1;
             if (!a.hasUrgent && b.hasUrgent) return 1;
-            return b.sentCount - a.sentCount; 
+            return b.totalValue - a.totalValue; 
         });
     }, [filteredProjects]);
 
@@ -129,10 +132,13 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
     const generateDraft = (clientData: typeof selectedClientData) => {
         if (!clientData) return;
         
-        const sentProjects = clientData.projects.filter(p => p.status === 'Sent');
+        // Projects are already filtered to 'Sent' by clientGroups logic
+        const sentProjects = clientData.projects; 
+        
         if (sentProjects.length === 0) {
+            // Fallback (shouldn't happen with current logic)
             setEmailSubject(`Checking in - ${clientData.name}`);
-            setEmailBody(`Hi ${clientData.name.split(' ')[0]},\n\nI wanted to touch base regarding our recent projects. Do you have any new requirements?\n\nBest,\nCarsan Electric`);
+            setEmailBody(`Hi ${clientData.name.split(' ')[0]},\n\nI wanted to touch base regarding our recent conversation. Do you have any new requirements?\n\nBest,\nCarsan Electric`);
         } else {
             const projectList = sentProjects.map(p => `- ${p.name} ($${(p.contractValue || 0).toLocaleString()})`).join('\n');
             setEmailSubject(`Follow Up: Outstanding Estimates for ${clientData.name}`);
@@ -525,10 +531,10 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                     <div className="w-full md:w-1/3 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
                         <div className="p-4 border-b border-slate-100 bg-slate-50">
                             <h3 className="font-bold text-slate-800 text-sm">Active Clients</h3>
-                            <p className="text-xs text-slate-500">Prioritized by urgency</p>
+                            <p className="text-xs text-slate-500">Only showing clients with Sent proposals</p>
                         </div>
                         <div className="flex-1 overflow-y-auto custom-scrollbar">
-                            {clientGroups.map((client, idx) => (
+                            {clientGroups.length > 0 ? clientGroups.map((client, idx) => (
                                 <div 
                                     key={idx} 
                                     onClick={() => setSelectedClientName(client.name)}
@@ -543,7 +549,12 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                         <span className="font-medium">${client.totalValue.toLocaleString()}</span>
                                     </div>
                                 </div>
-                            ))}
+                            )) : (
+                                <div className="p-8 text-center text-slate-400">
+                                    <CheckCircle className="w-12 h-12 mx-auto mb-2 opacity-20" />
+                                    <p className="text-sm">No pending proposals found in this period.</p>
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -568,7 +579,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                                     <h4 className="font-bold text-slate-900">{project.name}</h4>
                                                     <p className="text-xs text-slate-500">{project.address}</p>
                                                 </div>
-                                                <span className={`text-xs px-2 py-1 rounded-full font-bold ${project.status === 'Sent' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>{project.status}</span>
+                                                <span className={`text-xs px-2 py-1 rounded-full font-bold bg-blue-100 text-blue-700`}>{project.status}</span>
                                             </div>
                                             <div className="flex items-center gap-4 text-sm text-slate-600 mt-3 border-t border-slate-50 pt-3">
                                                 <span className="font-bold text-slate-700">${(project.contractValue || 0).toLocaleString()}</span>
@@ -581,9 +592,64 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                         ) : (
                             <div className="flex flex-col items-center justify-center h-full text-slate-400">
                                 <Users className="w-16 h-16 mb-4 opacity-20" />
-                                <p>Select a client to view details</p>
+                                <p>Select a client to view Sent proposals</p>
                             </div>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* EMAIL COMPOSER - Reused for Follow Up or Direct Email */}
+            {activeTab === 'email' && (
+                <div className="flex-1 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                    <div className="p-4 border-b border-slate-200 bg-slate-50">
+                        <h3 className="font-bold text-slate-800">Compose Email</h3>
+                    </div>
+                    <div className="p-6 space-y-4 flex-1 overflow-auto">
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">To</label>
+                            <input 
+                                value={emailTo}
+                                onChange={(e) => setEmailTo(e.target.value)}
+                                className="w-full border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                placeholder="client@example.com"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Subject</label>
+                            <input 
+                                value={emailSubject}
+                                onChange={(e) => setEmailSubject(e.target.value)}
+                                className="w-full border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                placeholder="Regarding Project X..."
+                            />
+                        </div>
+                        <div className="flex-1 h-full min-h-[200px]">
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Message</label>
+                            <textarea 
+                                value={emailBody}
+                                onChange={(e) => setEmailBody(e.target.value)}
+                                className="w-full h-full border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                                placeholder="Type your message here..."
+                                style={{ minHeight: '300px' }}
+                            />
+                        </div>
+                    </div>
+                    <div className="p-4 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
+                        <button 
+                            onClick={() => setActiveTab('pipeline')}
+                            className="px-6 py-2 text-slate-600 font-bold hover:bg-slate-200 rounded-lg transition"
+                        >
+                            Cancel
+                        </button>
+                        <button 
+                            onClick={handleSendEmail}
+                            disabled={isSending}
+                            className="px-8 py-2 bg-blue-600 text-white rounded-xl font-bold shadow-lg hover:bg-blue-700 transition flex items-center gap-2 disabled:opacity-70"
+                        >
+                            {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                            Send via Outlook
+                        </button>
                     </div>
                 </div>
             )}
