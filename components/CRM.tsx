@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { Lead, ProjectEstimate } from '../types';
 import { fetchOutlookEmails, sendOutlookEmail, getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId } from '../services/emailIntegration';
@@ -146,6 +145,23 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
         }
         
         setEmailTo(clientData.email);
+        setActiveTab('email');
+    };
+
+    const handleBulkDraft = () => {
+        const uniqueEmails = Array.from(new Set(
+            clientGroups.map(c => c.email).filter(e => e && e.includes('@'))
+        ));
+        
+        if (uniqueEmails.length === 0) {
+            alert("No valid email addresses found in the current list.");
+            return;
+        }
+
+        const emailString = uniqueEmails.join('; ');
+        setEmailTo(emailString);
+        setEmailSubject("Follow Up: Outstanding Proposals");
+        setEmailBody("Good morning,\n\nI am writing to follow up on the pending estimates we sent recently. We would love to move forward with your projects.\n\nPlease let me know if you have any questions or require any changes.\n\nBest regards,\nCarsan Electric");
         setActiveTab('email');
     };
 
@@ -529,9 +545,20 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
             {activeTab === 'followup' && (
                 <div className="flex-1 flex flex-col md:flex-row gap-6 h-full overflow-hidden">
                     <div className="w-full md:w-1/3 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
-                        <div className="p-4 border-b border-slate-100 bg-slate-50">
-                            <h3 className="font-bold text-slate-800 text-sm">Active Clients</h3>
-                            <p className="text-xs text-slate-500">Only showing clients with Sent proposals</p>
+                        <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                            <div>
+                                <h3 className="font-bold text-slate-800 text-sm">Active Clients</h3>
+                                <p className="text-xs text-slate-500">Only showing clients with Sent proposals</p>
+                            </div>
+                             {clientGroups.length > 0 && (
+                                <button 
+                                    onClick={handleBulkDraft}
+                                    className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 font-bold transition flex items-center gap-1"
+                                    title="Email all listed clients"
+                                >
+                                    <Mail className="w-3 h-3" /> Email All
+                                </button>
+                            )}
                         </div>
                         <div className="flex-1 overflow-y-auto custom-scrollbar">
                             {clientGroups.length > 0 ? clientGroups.map((client, idx) => (
@@ -612,7 +639,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, opportunities, setOpp
                                 value={emailTo}
                                 onChange={(e) => setEmailTo(e.target.value)}
                                 className="w-full border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                                placeholder="client@example.com"
+                                placeholder="client@example.com; client2@example.com"
                             />
                         </div>
                         <div>

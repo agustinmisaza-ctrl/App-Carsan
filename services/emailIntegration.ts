@@ -198,6 +198,20 @@ export const sendOutlookEmail = async (to: string, subject: string, body: string
     try {
         const accessToken = await getGraphToken(["Mail.Send"]);
         
+        // Support bulk sending by splitting delimiters
+        const recipients = to.split(/[;,]/)
+            .map(e => e.trim())
+            .filter(e => e.length > 0 && e.includes('@'))
+            .map(email => ({
+                emailAddress: {
+                    address: email
+                }
+            }));
+
+        if (recipients.length === 0) {
+            throw new Error("No valid recipients found.");
+        }
+
         const mail = {
             message: {
                 subject: subject,
@@ -205,13 +219,7 @@ export const sendOutlookEmail = async (to: string, subject: string, body: string
                     contentType: "Text",
                     content: body
                 },
-                toRecipients: [
-                    {
-                        emailAddress: {
-                            address: to
-                        }
-                    }
-                ]
+                toRecipients: recipients
             },
             saveToSentItems: "true"
         };
