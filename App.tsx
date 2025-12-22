@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Login } from './components/Login';
@@ -12,6 +13,7 @@ import { SharePointConnect } from './components/SharePointConnect';
 import { ViewState, User, ProjectEstimate, MaterialItem, ServiceTicket, Lead, PurchaseRecord, AuditLog } from './types';
 import { robustParseDate } from './utils/purchaseData';
 import { Calendar, Filter } from 'lucide-react';
+import { fetchSqlProjects, fetchSqlMaterials, fetchSqlTickets } from './services/sqlService';
 
 const RESET_APP = false;
 
@@ -27,6 +29,7 @@ export const App: React.FC = () => {
     const [currentView, setCurrentView] = useState<ViewState>(ViewState.DASHBOARD);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [dashboardFilter, setDashboardFilter] = useState<'YTD' | 'ALL'>('YTD');
+    const [isSqlConnected, setIsSqlConnected] = useState(false);
 
     const [projects, setProjects] = useState<ProjectEstimate[]>(() => loadState('carsan_projects', []));
     const [materials, setMaterials] = useState<MaterialItem[]>(() => loadState('carsan_materials', []));
@@ -38,38 +41,43 @@ export const App: React.FC = () => {
 
     const currentYear = new Date().getFullYear();
 
-    // --- AUTO-REPAIR DATA ON STARTUP ---
+    // --- SQL & DATA LOAD ON STARTUP ---
     useEffect(() => {
-        const repairDates = () => {
-            let changed = false;
-            
-            const repairedProjects = projects.map(p => {
-                const cleanDate = robustParseDate(p.dateCreated).toISOString();
-                if (p.dateCreated !== cleanDate) { changed = true; return { ...p, dateCreated: cleanDate }; }
-                return p;
-            });
-
-            const repairedPurchases = purchases.map(p => {
-                const cleanDate = robustParseDate(p.date).toISOString();
-                if (p.date !== cleanDate) { changed = true; return { ...p, date: cleanDate }; }
-                return p;
-            });
-
-            const repairedTickets = tickets.map(t => {
-                const cleanDate = robustParseDate(t.dateCreated).toISOString();
-                if (t.dateCreated !== cleanDate) { changed = true; return { ...t, dateCreated: cleanDate }; }
-                return t;
-            });
-
-            if (changed) {
-                console.log("Sparky: Auto-repaired corrupted date formats in your database.");
-                setProjects(repairedProjects);
-                setPurchases(repairedPurchases);
-                setTickets(repairedTickets);
+        const initData = async () => {
+            try {
+                // Attempt to fetch from SQL Server Middleware
+                // If this fails, we fall back to LocalStorage (already loaded in useState initializers)
+                const sqlProjects = await fetchSqlProjects();
+                console.log("Connected to SQL Server. Loaded projects:", sqlProjects.length);
+                setProjects(sqlProjects);
+                
+                // You would add fetchSqlMaterials and fetchSqlTickets here similarly
+                
+                setIsSqlConnected(true);
+            } catch (e) {
+                console.log("SQL Server not detected. Running in LocalStorage mode.");
+                setIsSqlConnected(false);
             }
+
+            // Auto-repair existing data formats
+            const repairDates = () => {
+                let changed = false;
+                
+                const repairedProjects = projects.map(p => {
+                    const cleanDate = robustParseDate(p.dateCreated).toISOString();
+                    if (p.dateCreated !== cleanDate) { changed = true; return { ...p, dateCreated: cleanDate }; }
+                    return p;
+                });
+
+                if (changed) {
+                    setProjects(repairedProjects);
+                }
+            };
+            repairDates();
         };
-        repairDates();
-    }, []); // Only runs once on boot
+
+        initData();
+    }, []); 
 
     useEffect(() => localStorage.setItem('carsan_projects', JSON.stringify(projects)), [projects]);
     useEffect(() => localStorage.setItem('carsan_materials', JSON.stringify(materials)), [materials]);
@@ -293,6 +301,12 @@ export const App: React.FC = () => {
                 <div className="md:hidden bg-slate-900 text-white p-4 flex justify-between items-center shrink-0"><span className="font-bold">CARSAN Electric</span><button onClick={() => setIsSidebarOpen(true)}>Menu</button></div>
                 <div className="flex-1 overflow-auto">{renderView()}</div>
                 <AIAssistant projects={projects} materials={materials} tickets={tickets} leads={leads} purchases={purchases} />
+                
+                {/* Database Connection Status Toast */}
+                <div className={`fixed bottom-4 left-64 ml-4 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 z-50 transition-all ${isSqlConnected ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-slate-200 text-slate-600 border border-slate-300 opacity-50 hover:opacity-100'}`}>
+                    <div className={`w-2 h-2 rounded-full ${isSqlConnected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`}></div>
+                    {isSqlConnected ? 'SQL Server Connected' : 'Local Storage Mode'}
+                </div>
             </main>
         </div>
     );

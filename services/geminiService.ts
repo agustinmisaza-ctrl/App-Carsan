@@ -3,6 +3,8 @@ import { MaterialItem, AnalysisResult, Lead, ProjectEstimate, ServiceTicket, Pur
 
 // Adhere to coding guidelines for model selection: 'gemini-3-flash-preview' for general text tasks
 const GEMINI_MODEL = "gemini-3-flash-preview";
+// Use Pro model for complex blueprint analysis/vision tasks to improve recognition accuracy
+const VISION_MODEL = "gemini-3-pro-preview"; 
 const LIVE_MODEL = 'gemini-2.5-flash-native-audio-preview-09-2025';
 
 // Schema for the analysis response
@@ -100,19 +102,22 @@ export const analyzeBlueprint = async (
     
     Task:
     1. Analyze the provided electrical blueprint image or PDF page.
-    2. Identify standard electrical symbols and components.
-    3. Count the quantities of each component found.
+    2. Identify standard electrical symbols and components (Outlets, Switches, Lights, Panels, J-Boxes, Smoke Detectors).
+    3. Count the quantities of each component found accurately.
     4. Return the data in a structured JSON format.
 
     Context - Available Price Database Items:
-    The user has the following items in their database. Try to map your findings to these names if applicable, or use standard industry terms (NEC 2023) if no exact match is found.
-    
+    The user has the following items in their database. Map your findings to these specific names where possible.
     ${dbContext}
 
     Specific Instructions:
-    - Look for Receptacles (Duplex, GFI, WP), Switches (S, S3, S4, Dimmer), Light Fixtures (Recessed, Surface, Strip), Junction Boxes, Data outlets, and Panels.
-    - Be conservative with counts but try to be accurate.
-    - Ignore architectural lines, focus on electrical layers.
+    - Focus strictly on the ELECTRICAL layer. Ignore architectural dimensions or furniture unless relevant to electrical placement.
+    - If a symbol is ambiguous, use the context of the room (e.g., countertop height symbols are usually GFI).
+    - Differentiate between:
+      - Duplex Receptacles vs GFI Receptacles
+      - Single Pole Switches vs 3-Way/4-Way Switches
+      - Recessed Cans vs Surface Mount Lights
+    - Return a realistic count. If the image is a partial view, count only what is visible.
   `;
 
   // Dynamically detect mimeType (fixes INVALID_ARGUMENT error for PDFs/JPEGs)
@@ -120,7 +125,7 @@ export const analyzeBlueprint = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
+      model: VISION_MODEL, // Use Pro model for better blueprint reasoning
       contents: {
         parts: [
           {
@@ -135,7 +140,7 @@ export const analyzeBlueprint = async (
       config: {
         responseMimeType: "application/json",
         responseSchema: analysisSchema,
-        temperature: 0.1, // Low temperature for factual counting
+        temperature: 0, // Lower temperature for more precise counting
       }
     });
 
