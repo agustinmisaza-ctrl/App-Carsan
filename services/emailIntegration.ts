@@ -209,7 +209,7 @@ export const sendOutlookEmail = async (to: string, subject: string, body: string
             }));
 
         if (recipients.length === 0) {
-            throw new Error("No valid recipients found.");
+            throw new Error("No valid recipients found. Please check email format.");
         }
 
         const mail = {
@@ -221,7 +221,7 @@ export const sendOutlookEmail = async (to: string, subject: string, body: string
                 },
                 toRecipients: recipients
             },
-            saveToSentItems: "true"
+            saveToSentItems: true // Must be a boolean
         };
 
         const response = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
@@ -235,6 +235,7 @@ export const sendOutlookEmail = async (to: string, subject: string, body: string
 
         if (!response.ok) {
             const err = await response.json();
+            console.error("Graph API Send Error:", err);
             throw new Error(err.error?.message || response.statusText);
         }
     } catch (error: any) {

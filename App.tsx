@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Login } from './components/Login';
@@ -14,6 +13,7 @@ import { ViewState, User, ProjectEstimate, MaterialItem, ServiceTicket, Lead, Pu
 import { robustParseDate } from './utils/purchaseData';
 import { Calendar, Filter } from 'lucide-react';
 import { fetchSqlProjects, fetchSqlMaterials, fetchSqlTickets } from './services/sqlService';
+import { signOut } from './services/emailIntegration';
 
 const RESET_APP = false;
 
@@ -102,7 +102,7 @@ export const App: React.FC = () => {
 
     const handleLogin = (u: User) => { setUser(u); localStorage.setItem('carsan_user', JSON.stringify(u)); logActivity('Login', 'User logged in'); };
     const handleLogout = () => { 
-        import('./services/emailIntegration').then(m => m.signOut()); 
+        signOut();
         setUser(null); localStorage.removeItem('carsan_user'); setCurrentView(ViewState.DASHBOARD); window.location.reload(); 
     };
 

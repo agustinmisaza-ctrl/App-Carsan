@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { PurchaseRecord, MaterialItem, ProjectEstimate, ServiceTicket } from '../types';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell, ReferenceLine, Scatter, AreaChart, Area } from 'recharts';
-import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, PieChart, Sparkles, ListFilter, Flame, AlertTriangle, Trash2, Plus, Save, Briefcase, Wallet, RefreshCw, Calendar, Info } from 'lucide-react';
+import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, PieChart, Sparkles, ListFilter, Flame, AlertTriangle, Trash2, Plus, Save, Briefcase, Wallet, RefreshCw, Calendar, Info, Download } from 'lucide-react';
 import { extractInvoiceData } from '../services/geminiService';
 import * as XLSX from 'xlsx';
 import { parseCurrency, normalizeSupplier, robustParseDate } from '../utils/purchaseData';
@@ -125,6 +125,42 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
 
       return { totalRevenue, totalExpenses, netProfit, margin, projectRevenue, serviceRevenue, materialExpense, totalLaborExpense };
   }, [filteredData]);
+
+  // --- JOB COSTING DATA CALCULATION ---
+  const jobCostingData = useMemo(() => {
+      // Filter projects that are in relevant stages for costing
+      const activeProjects = projects.filter(p => ['Won', 'Ongoing', 'Completed'].includes(p.status));
+      
+      return activeProjects.map(p => {
+          // Calculate Estimates from the Project Items
+          const estMat = p.items.reduce((sum, i) => sum + (i.quantity * i.unitMaterialCost), 0);
+          const estLab = p.items.reduce((sum, i) => sum + (i.quantity * i.unitLaborHours * p.laborRate), 0);
+          
+          // Calculate Actuals from Purchases (Matching by Project Name)
+          // Note: In a real app, this would use ID matching. Here we use Name fuzzy matching.
+          const actMat = purchases
+              .filter(pur => pur.projectName && pur.projectName.trim().toLowerCase() === p.name.trim().toLowerCase())
+              .reduce((sum, pur) => sum + pur.totalCost, 0);
+          
+          // Actual Labor - Placeholder as we don't have time tracking data yet
+          // Can be updated later to pull from a TimeSheet module
+          const actLab = 0; 
+          
+          // Fallback contract value logic if not explicitly set
+          const contract = p.contractValue || (estMat + estLab) * 1.3; 
+          
+          return {
+              id: p.id,
+              name: p.name,
+              status: p.status,
+              contract,
+              estMat,
+              actMat,
+              estLab,
+              actLab
+          };
+      }).sort((a, b) => b.contract - a.contract); // Sort by biggest projects first
+  }, [projects, purchases]);
 
   // --- PURCHASING ANALYSIS LOGIC (Including optional Benchmarks) ---
   const processedItemsList = useMemo(() => {
@@ -611,11 +647,65 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases, setPurc
       {activeTab === 'job-costing' && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
               <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-                  <h3 className="font-bold text-slate-800">Project Profitability</h3>
-                  <div className="text-xs text-slate-500 italic">*Labor Cost Estimated at 40% of Billed Labor</div>
+                  <h3 className="font-bold text-slate-800">Project Profitability & Job Costing</h3>
+                  <div className="flex items-center gap-2">
+                     <span className="text-xs text-slate-500 italic hidden md:inline">* Actual Labor data requires Time Tracking module</span>
+                     <button className="text-blue-600 hover:bg-blue-50 p-2 rounded-lg" title="Export CSV"><Download className="w-4 h-4" /></button>
+                  </div>
               </div>
               <div className="overflow-x-auto">
-                   <p className="p-8 text-center text-slate-400">Loading job costs based on actual spend vs contract values...</p>
+                   <table className="w-full text-sm text-left min-w-[1000px]">
+                       <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-xs">
+                           <tr>
+                               <th className="px-6 py-4">Project Name</th>
+                               <th className="px-4 py-4 text-center">Status</th>
+                               <th className="px-4 py-4 text-right">Contract</th>
+                               <th className="px-4 py-4 text-right border-l border-slate-200">Est. Mat</th>
+                               <th className="px-4 py-4 text-right">Act. Mat</th>
+                               <th className="px-4 py-4 text-right">Var %</th>
+                               <th className="px-4 py-4 text-right border-l border-slate-200">Est. Lab</th>
+                               <th className="px-4 py-4 text-right">Act. Lab</th>
+                               <th className="px-6 py-4 text-right border-l border-slate-200">Gross Profit</th>
+                           </tr>
+                       </thead>
+                       <tbody className="divide-y divide-slate-100">
+                           {jobCostingData.map(row => {
+                               const matVar = row.estMat > 0 ? ((row.actMat - row.estMat) / row.estMat) * 100 : 0;
+                               const grossProfit = row.contract - (row.actMat + row.actLab); // Using Actuals for profit calculation
+                               
+                               return (
+                                   <tr key={row.id} className="hover:bg-slate-50 transition-colors">
+                                       <td className="px-6 py-4 font-bold text-slate-800">{row.name}</td>
+                                       <td className="px-4 py-4 text-center">
+                                           <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border uppercase tracking-wider ${row.status === 'Completed' ? 'bg-slate-100 text-slate-600 border-slate-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200'}`}>
+                                               {row.status}
+                                           </span>
+                                       </td>
+                                       <td className="px-4 py-4 text-right font-bold text-slate-900">${row.contract.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                                       
+                                       <td className="px-4 py-4 text-right border-l border-slate-200 text-slate-600">${row.estMat.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                                       <td className="px-4 py-4 text-right font-medium text-slate-800">${row.actMat.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                                       <td className="px-4 py-4 text-right">
+                                           <div className={`flex items-center justify-end gap-1 font-bold ${matVar > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                                               {matVar > 0 ? <TrendingUp className="w-3 h-3" /> : <CheckCircle className="w-3 h-3" />}
+                                               {Math.abs(matVar).toFixed(1)}%
+                                           </div>
+                                       </td>
+                                       
+                                       <td className="px-4 py-4 text-right border-l border-slate-200 text-slate-600">${row.estLab.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                                       <td className="px-4 py-4 text-right text-slate-400 italic">${row.actLab.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                                       
+                                       <td className="px-6 py-4 text-right border-l border-slate-200 font-bold text-emerald-700 bg-emerald-50/30">
+                                           ${grossProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                       </td>
+                                   </tr>
+                               );
+                           })}
+                           {jobCostingData.length === 0 && (
+                               <tr><td colSpan={9} className="p-12 text-center text-slate-400">No active or completed projects found to analyze.</td></tr>
+                           )}
+                       </tbody>
+                   </table>
               </div>
           </div>
       )}
