@@ -165,3 +165,15 @@ export interface AuditLog {
     details: string;
     timestamp: string;
 }
+
+export interface SupplierStatus {
+    name: string;
+    isBlocked: boolean; // True if > 60 days past due
+    daysPastDue?: number;
+}
+
+export interface ShoppingItem {
+    id: string;
+    name: string;
+    quantity: number;
+}
