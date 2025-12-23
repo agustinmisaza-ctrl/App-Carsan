@@ -716,7 +716,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col h-full overflow-hidden">
                   <div className="p-4 border-b border-slate-100 bg-slate-50">
                       <h3 className="font-bold text-slate-800 flex items-center gap-2"><ShieldAlert className="w-4 h-4 text-orange-500"/> Supplier Status</h3>
-                      <p className="text-[10px] text-slate-500">Block suppliers > 60 days past due</p>
+                      <p className="text-[10px] text-slate-500">Block suppliers &gt; 60 days past due</p>
                   </div>
                   <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
                       {supplierStatuses.map(supplier => (
