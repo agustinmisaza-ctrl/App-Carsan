@@ -1,6 +1,6 @@
 
 import { getGraphToken } from "./emailIntegration";
-import { PurchaseRecord, ProjectEstimate, ProjectMapping } from "../types";
+import { ProjectEstimate, ProjectMapping } from "../types";
 
 export interface SPSite { id: string; displayName: string; webUrl: string; }
 export interface SPList { id: string; displayName: string; }
@@ -50,6 +50,30 @@ export const getListItems = async (siteId: string, listId: string): Promise<SPIt
     return items;
 };
 
+// Smart Status Mapper (Etapa -> App Status)
+const normalizeSharePointStatus = (val: string): ProjectEstimate['status'] => {
+    if (!val) return 'Draft';
+    const v = String(val).toLowerCase().trim();
+    
+    // Won / Ganado
+    if (v.includes('ganado') || v.includes('won') || v.includes('adjudicado') || v.includes('cerrado') || v.includes('award') || v.includes('contratado')) return 'Won';
+    
+    // Lost / Perdido
+    if (v.includes('perdido') || v.includes('lost') || v.includes('rechazado') || v.includes('cancel') || v.includes('discard')) return 'Lost';
+    
+    // Sent / Enviado / Cotizado
+    if (v.includes('enviado') || v.includes('sent') || v.includes('cotizado') || v.includes('presentada') || v.includes('submitted') || v.includes('waiting')) return 'Sent';
+    
+    // Ongoing / En Ejecución
+    if (v.includes('ejecucion') || v.includes('ongoing') || v.includes('obra') || v.includes('construction') || v.includes('active') || v.includes('curso')) return 'Ongoing';
+    
+    // Completed / Terminado
+    if (v.includes('completado') || v.includes('completed') || v.includes('terminado') || v.includes('final') || v.includes('entregado')) return 'Completed';
+    
+    // Default to Draft if it's "Borrador", "Draft", "En Proceso" (generic), or unknown
+    return 'Draft';
+};
+
 export const fetchMappedListItems = async (
     siteId: string, 
     listId: string, 
@@ -57,22 +81,27 @@ export const fetchMappedListItems = async (
 ): Promise<ProjectEstimate[]> => {
     const items = await getListItems(siteId, listId);
     
-    // Filtramos los items: Solo aquellos donde la columna mapeada como 'area' tenga el valor 'USA'
+    // Filter items: Only those where the mapped 'area' column equals 'USA'
     const filteredItems = items.filter(item => {
-        if (!mapping.area) return true; // Si no hay mapeo de área, no filtramos nada
+        if (!mapping.area) return true; // If no area mapping, return all
         const areaValue = item.fields[mapping.area];
         return String(areaValue).trim().toUpperCase() === 'USA';
     });
 
     return filteredItems.map(item => {
         const f = item.fields;
+        
+        // Use the smart normalizer for status (Etapa)
+        const rawStatus = f[mapping.status];
+        const normalizedStatus = normalizeSharePointStatus(rawStatus);
+
         return {
             id: `sp-${item.id}`,
             name: f[mapping.name] || 'Sin Nombre',
             client: f[mapping.client] || 'Desconocido',
-            status: f[mapping.status] || 'Draft',
+            status: normalizedStatus,
             contractValue: parseFloat(f[mapping.contractValue]) || 0,
-            address: f[mapping.address] || '',
+            address: f[mapping.address] || 'Miami, FL',
             estimator: f[mapping.estimator] || '',
             dateCreated: f[mapping.dateCreated] || item.createdDateTime || new Date().toISOString(),
             awardedDate: f[mapping.awardedDate] || null,
