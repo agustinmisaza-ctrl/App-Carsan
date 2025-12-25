@@ -1,8 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
-import { Search, Database, Loader2, Link as LinkIcon, CheckCircle, RefreshCw, ChevronRight, LayoutList, Settings2, Save, Filter } from 'lucide-react';
+import { Search, Database, Loader2, Link as LinkIcon, CheckCircle, RefreshCw, ChevronRight, LayoutList, Settings2, Save, Filter, Settings, LogIn } from 'lucide-react';
 import { searchSharePointSites, getSharePointLists, getListColumns, fetchMappedListItems, SPSite, SPList, SPColumn } from '../services/sharepointService';
 import { ProjectMapping, ProjectEstimate, MaterialItem, ServiceTicket, PurchaseRecord } from '../types';
+import { getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId } from '../services/emailIntegration';
 
 interface SharePointConnectProps {
     projects: ProjectEstimate[];
@@ -21,6 +22,11 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
     const [selectedSite, setSelectedSite] = useState<SPSite | null>(null);
     const [selectedList, setSelectedList] = useState<SPList | null>(null);
     
+    // Settings State
+    const [showSettings, setShowSettings] = useState(false);
+    const [tenantId, setTenantId] = useState(getStoredTenantId() || '');
+    const [clientId, setClientId] = useState(getStoredClientId() || '');
+
     const [mapping, setMapping] = useState<ProjectMapping>(() => {
         const saved = localStorage.getItem('carsan_sp_mapping');
         return saved ? JSON.parse(saved) : {
@@ -40,20 +46,45 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        handleSearchSites();
+        // Only attempt auto-connect if we have configuration
+        if (getStoredClientId()) {
+            handleSearchSites(true);
+        } else {
+            setShowSettings(true);
+        }
     }, []);
 
-    const handleSearchSites = async () => {
+    const handleSearchSites = async (isAuto = false) => {
         setIsLoading(true);
         setError(null);
         try {
             const results = await searchSharePointSites("");
             setSites(results);
         } catch (e: any) {
-            setError("Error al buscar sitios. Verifica tu conexión.");
+            console.error("SharePoint Search Error:", e);
+            // If auto-connect fails (likely popup blocked), we show a specific message
+            // or just the standard error, but the user can now click 'Retry' to fix it.
+            let msg = e.message || "Error al buscar sitios.";
+            if (isAuto && (msg.includes("interaction") || msg.includes("popup") || msg.toLowerCase().includes("failed to fetch"))) {
+                 msg = "Se requiere iniciar sesión. Por favor haz clic en 'Conectar' para autorizar.";
+            }
+            setError(msg);
+            
+            // If error implies missing config, open settings automatically
+            if (e.message?.includes('Client ID')) {
+                setShowSettings(true);
+            }
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const handleSaveSettings = () => {
+        setStoredTenantId(tenantId.trim());
+        setStoredClientId(clientId.trim());
+        setShowSettings(false);
+        setError(null);
+        handleSearchSites(false); // Manual trigger
     };
 
     const handleSelectSite = async (site: SPSite) => {
@@ -63,8 +94,8 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
             const results = await getSharePointLists(site.id);
             setLists(results);
             setStep(1);
-        } catch (e) {
-            setError("No se pudieron cargar las listas de este sitio.");
+        } catch (e: any) {
+            setError(e.message || "No se pudieron cargar las listas de este sitio.");
         } finally {
             setIsLoading(false);
         }
@@ -90,8 +121,8 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
             });
             setMapping(autoMap);
             setStep(2);
-        } catch (e) {
-            setError("No se pudieron obtener las columnas de la lista.");
+        } catch (e: any) {
+            setError(e.message || "No se pudieron obtener las columnas de la lista.");
         } finally {
             setIsLoading(false);
         }
@@ -134,15 +165,58 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
     return (
         <div className="p-4 md:p-8 max-w-4xl mx-auto space-y-6">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <div className="flex items-center gap-3 mb-6">
-                    <div className="p-3 bg-blue-600 rounded-xl text-white">
-                        <Database className="w-6 h-6" />
+                <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                        <div className="p-3 bg-blue-600 rounded-xl text-white">
+                            <Database className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <h1 className="text-2xl font-bold text-slate-900">SharePoint Schema Mapper</h1>
+                            <p className="text-sm text-slate-500">Filtrado inteligente: AREA = USA</p>
+                        </div>
                     </div>
-                    <div>
-                        <h1 className="text-2xl font-bold text-slate-900">SharePoint Schema Mapper</h1>
-                        <p className="text-sm text-slate-500">Filtrado inteligente: AREA = USA</p>
-                    </div>
+                    <button 
+                        onClick={() => setShowSettings(!showSettings)}
+                        className={`p-2 rounded-lg border transition-colors ${showSettings ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white border-slate-200 text-slate-500'}`}
+                        title="Configuración de Conexión"
+                    >
+                        <Settings className="w-5 h-5" />
+                    </button>
                 </div>
+
+                {showSettings && (
+                    <div className="bg-slate-50 border border-blue-100 p-6 rounded-xl mb-6 animate-in slide-in-from-top-2">
+                        <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                            <Settings className="w-4 h-4" /> Configuración de Azure AD
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Azure Tenant ID</label>
+                                <input 
+                                    value={tenantId}
+                                    onChange={(e) => setTenantId(e.target.value)}
+                                    placeholder="common (o GUID del tenant)"
+                                    className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Client ID (App ID)</label>
+                                <input 
+                                    value={clientId}
+                                    onChange={(e) => setClientId(e.target.value)}
+                                    placeholder="GUID de la Aplicación"
+                                    className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                                />
+                            </div>
+                        </div>
+                        <div className="mt-4 flex justify-end gap-3">
+                             <button onClick={() => setShowSettings(false)} className="px-4 py-2 text-slate-500 font-bold text-sm">Cancelar</button>
+                             <button onClick={handleSaveSettings} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
+                                <Save className="w-4 h-4" /> Guardar y Reconectar
+                             </button>
+                        </div>
+                    </div>
+                )}
 
                 <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400 mb-8 overflow-x-auto pb-2">
                     <span className={step === 0 ? 'text-blue-600' : ''}>1. Sitio</span>
@@ -160,17 +234,30 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                 )}
 
                 {error && (
-                    <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl flex items-center gap-3 mb-6">
-                        <LinkIcon className="w-5 h-5" />
-                        <span className="text-sm font-medium">{error}</span>
+                    <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl flex flex-col items-start gap-3 mb-6">
+                        <div className="flex items-start gap-3 w-full">
+                            <LinkIcon className="w-5 h-5 mt-0.5 shrink-0" />
+                            <div className="flex-1">
+                                <span className="font-bold block mb-1">Error de Conexión</span>
+                                <span className="text-sm">{error}</span>
+                            </div>
+                        </div>
+                        <div className="flex gap-2 ml-8 mt-2">
+                            <button onClick={() => handleSearchSites(false)} className="flex items-center gap-2 text-xs bg-red-100 hover:bg-red-200 text-red-800 px-3 py-1.5 rounded font-bold transition-colors">
+                                <RefreshCw className="w-3 h-3" /> Reintentar Conexión
+                            </button>
+                            <button onClick={() => setShowSettings(true)} className="flex items-center gap-2 text-xs bg-white border border-red-200 hover:bg-red-50 text-red-800 px-3 py-1.5 rounded font-bold transition-colors">
+                                <Settings className="w-3 h-3" /> Configurar
+                            </button>
+                        </div>
                     </div>
                 )}
 
-                {!isLoading && (
+                {!isLoading && !error && (
                     <>
                         {step === 0 && (
                             <div className="grid grid-cols-1 gap-3">
-                                {sites.map(site => (
+                                {sites.length > 0 ? sites.map(site => (
                                     <button 
                                         key={site.id} 
                                         onClick={() => handleSelectSite(site)}
@@ -182,10 +269,15 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                                         </div>
                                         <ChevronRight className="w-5 h-5 text-slate-300" />
                                     </button>
-                                ))}
-                                <button onClick={handleSearchSites} className="mt-4 flex items-center justify-center gap-2 text-sm font-bold text-blue-600 hover:underline">
-                                    <RefreshCw className="w-4 h-4" /> Actualizar Sitios
-                                </button>
+                                )) : (
+                                    <div className="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-300">
+                                        <div className="mx-auto w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mb-3">
+                                            <Database className="w-6 h-6 text-slate-400" />
+                                        </div>
+                                        <p className="text-slate-500 text-sm mb-4">No se encontraron sitios. Verifica tus permisos.</p>
+                                        <button onClick={() => handleSearchSites(false)} className="text-blue-600 font-bold text-sm hover:underline">Actualizar Sitios</button>
+                                    </div>
+                                )}
                             </div>
                         )}
 

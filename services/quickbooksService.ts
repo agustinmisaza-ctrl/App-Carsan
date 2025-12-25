@@ -1,100 +1,78 @@
 
 import { PurchaseRecord } from "../types";
+import { robustParseDate, normalizeSupplier, parseCurrency } from "../utils/purchaseData";
 
-// CONFIGURATION
-// Set this to true to use the simulation (for demo)
-// Set this to false to use your real backend server (http://localhost:8000)
-const USE_SIMULATION = true; 
+const STORAGE_KEY_QB_WEBHOOK = 'carsan_qb_webhook_url';
 
-const BACKEND_URL = 'http://localhost:8000';
+export const getZapierWebhookUrl = (): string => {
+    return localStorage.getItem(STORAGE_KEY_QB_WEBHOOK) || '';
+};
 
-export const connectToQuickBooks = async (): Promise<string> => {
-    if (USE_SIMULATION) {
-        return new Promise((resolve) => {
-            setTimeout(() => {
-                // Simulate a successful redirect URL back to our app
-                resolve(`${window.location.origin}?status=success`); 
-            }, 1500);
-        });
-    } else {
-        // REAL MODE: Get the Auth URL from your Node.js backend
-        try {
-            const response = await fetch(`${BACKEND_URL}/authUri`);
-            const data = await response.json();
-            // In a real scenario, you would window.location.href = data.url here
-            // But for this function, we just return the URL to be handled by the component
-            return data.url;
-        } catch (error) {
-            console.error("Backend not found. Is node server.js running?", error);
-            throw new Error("Could not connect to Backend Server.");
-        }
+export const setZapierWebhookUrl = (url: string) => {
+    localStorage.setItem(STORAGE_KEY_QB_WEBHOOK, url.trim());
+};
+
+export const connectToQuickBooks = async (): Promise<boolean> => {
+    const url = getZapierWebhookUrl();
+    if (!url) {
+        throw new Error("Zapier Webhook URL not configured. Please open settings.");
     }
+    return true;
 };
 
 export const fetchQuickBooksBills = async (): Promise<PurchaseRecord[]> => {
-    if (USE_SIMULATION) {
-        // ... Existing Simulation Logic ...
-        console.log("Fetching from QuickBooks (Simulated)...");
-        return new Promise((resolve) => {
-            setTimeout(() => {
-                const simulatedData: PurchaseRecord[] = [
-                    {
-                        id: 'qb-1001',
-                        date: '2024-03-10T00:00:00.000Z',
-                        poNumber: '1001',
-                        brand: 'Square D',
-                        itemDescription: '200A Panel Board NEMA 1',
-                        quantity: 1,
-                        unitCost: 350.00,
-                        totalCost: 350.00,
-                        supplier: 'World Electric (QB)',
-                        projectName: 'Brickell City Centre',
-                        type: 'Distribution',
-                        source: 'QuickBooks'
-                    },
-                    {
-                        id: 'qb-1002',
-                        date: '2024-03-12T00:00:00.000Z',
-                        poNumber: '1002',
-                        brand: 'Southwire',
-                        itemDescription: '12/2 Romex Wire (1000ft)',
-                        quantity: 2,
-                        unitCost: 280.00,
-                        totalCost: 560.00,
-                        supplier: 'CES (QB)',
-                        projectName: 'Coral Gables Villa',
-                        type: 'Wire',
-                        source: 'QuickBooks'
-                    }
-                ];
-                resolve(simulatedData);
-            }, 2000);
+    const url = getZapierWebhookUrl();
+    
+    if (!url) {
+        throw new Error("Webhook URL missing");
+    }
+
+    try {
+        console.log("Fetching from Zapier Webhook:", url);
+        
+        // We use POST to trigger the webhook. 
+        // Ensure your Zapier 'Catch Hook' is set up to return data (requires Code Step or specific configuration)
+        // or assumes the Zap populates a secondary source this fetches from.
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ action: 'fetch_bills', timestamp: new Date().toISOString() })
         });
-    } else {
-        // REAL MODE: Fetch from your Node.js backend
-        try {
-            const response = await fetch(`${BACKEND_URL}/get-bills`);
-            const qbData = await response.json();
-            
-            // Map QB Data to your App format
-            // Note: You will need to adjust this mapping based on exactly what QB returns
-            return qbData.QueryResponse.Bill.map((bill: any) => ({
-                id: `qb-${bill.Id}`,
-                date: bill.TxnDate,
-                poNumber: bill.DocNumber || 'N/A',
-                brand: 'N/A',
-                itemDescription: bill.Line[0]?.Description || 'Unspecified Material', // Simplification: taking first line
-                quantity: 1, 
-                unitCost: bill.TotalAmt,
-                totalCost: bill.TotalAmt,
-                supplier: bill.VendorRef?.name || 'QuickBooks Vendor',
-                projectName: 'QB Import',
-                type: 'Material',
-                source: 'QuickBooks'
-            }));
-        } catch (error) {
-            console.error("Error fetching QB bills", error);
-            throw new Error("Failed to fetch data from QuickBooks.");
+
+        if (!response.ok) {
+            throw new Error(`Zapier connection failed: ${response.statusText}`);
         }
+
+        const data = await response.json();
+        
+        // Handle case where Zapier returns { "bills": [...] } or just [...]
+        const rawBills = Array.isArray(data) ? data : (data.bills || data.data || []);
+
+        if (!Array.isArray(rawBills)) {
+            console.warn("Unexpected Zapier response format", data);
+            return [];
+        }
+
+        // Map generic JSON to PurchaseRecord
+        return rawBills.map((bill: any, index: number) => ({
+            id: `qb-${bill.Id || bill.id || index}`,
+            date: robustParseDate(bill.TxnDate || bill.date || new Date()).toISOString(),
+            poNumber: bill.DocNumber || bill.doc_number || 'N/A',
+            brand: 'N/A',
+            itemDescription: bill.Description || (bill.Line && bill.Line[0]?.Description) || 'QuickBooks Import',
+            quantity: 1, 
+            unitCost: parseCurrency(String(bill.TotalAmt || bill.amount || 0)),
+            totalCost: parseCurrency(String(bill.TotalAmt || bill.amount || 0)),
+            supplier: normalizeSupplier(bill.VendorRef?.name || bill.vendor || 'QuickBooks Vendor'),
+            projectName: 'QB Import',
+            type: 'Material',
+            source: 'QuickBooks'
+        }));
+
+    } catch (error: any) {
+        console.error("Error fetching QB bills via Zapier", error);
+        throw new Error(error.message || "Failed to sync with Zapier.");
     }
 };
