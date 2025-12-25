@@ -1,9 +1,8 @@
 
 import React, { useState } from 'react';
 import { Lead, ProjectEstimate } from '../types';
-import { fetchOutlookEmails, sendOutlookEmail } from '../services/emailIntegration';
-import { Trello, List, Plus, Search, Calendar, RefreshCw, User, Briefcase, DollarSign, Mail, CheckCircle, XCircle, ArrowRight, Trash2, Send, Clock, AlertCircle, ChevronRight, Inbox } from 'lucide-react';
-import { robustParseDate } from '../utils/purchaseData';
+import { fetchOutlookEmails } from '../services/emailIntegration';
+import { Trello, List, Search, RefreshCw, Briefcase, Mail, CheckCircle, XCircle, ArrowRight, Trash2 } from 'lucide-react';
 
 interface CRMProps {
     leads: Lead[];
@@ -15,15 +14,9 @@ interface CRMProps {
 }
 
 export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setProjects }) => {
-    const [activeTab, setActiveTab] = useState<'pipeline' | 'leads' | 'followup' | 'email'>('pipeline');
+    const [activeTab, setActiveTab] = useState<'pipeline' | 'leads'>('pipeline');
     const [isLoading, setIsLoading] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
-    
-    // Email State
-    const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
-    const [replySubject, setReplySubject] = useState('');
-    const [replyBody, setReplyBody] = useState('');
-    const [sendingEmail, setSendingEmail] = useState(false);
 
     const handleFetchLeads = async () => {
         setIsLoading(true);
@@ -37,9 +30,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
                 }
             });
             setLeads(newLeads);
-            if (activeTab === 'email' && !selectedLead && data.length > 0) {
-                 // Optionally select first email
-            }
+            alert(`Synced ${data.length} emails from Outlook.`);
         } catch (error) {
             console.error(error);
             alert("Failed to fetch leads. Ensure Client ID is configured in Settings.");
@@ -72,30 +63,10 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
     };
 
     const deleteLead = (id: string) => {
-        if(confirm("Are you sure you want to discard this item?")) {
+        if(confirm("Are you sure you want to discard this lead?")) {
             setLeads(leads.filter(l => l.id !== id));
-            if (selectedLead?.id === id) setSelectedLead(null);
         }
     };
-
-    const handleSendReply = async () => {
-        if (!selectedLead || !replyBody) return;
-        setSendingEmail(true);
-        try {
-            await sendOutlookEmail(selectedLead.email, replySubject, replyBody);
-            alert("Email sent successfully!");
-            setReplyBody('');
-            // Mark as contacted or similar logic could go here
-        } catch (e: any) {
-            alert("Failed to send: " + e.message);
-        } finally {
-            setSendingEmail(false);
-        }
-    };
-
-    const upcomingFollowUps = projects
-        .filter(p => p.followUpDate && new Date(p.followUpDate) <= new Date() && !['Won', 'Lost', 'Completed'].includes(p.status))
-        .sort((a,b) => new Date(a.followUpDate!).getTime() - new Date(b.followUpDate!).getTime());
 
     // --- PIPELINE KANBAN ---
     const renderKanbanColumn = (title: string, status: ProjectEstimate['status'], colorClass: string) => {
@@ -173,31 +144,18 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 shrink-0">
                 <div>
                     <h1 className="text-3xl font-bold text-slate-900 tracking-tight">CRM & Pipeline</h1>
-                    <p className="text-slate-500 mt-1">Manage leads, follow-ups, and project stages.</p>
+                    <p className="text-slate-500 mt-1">Manage leads and project stages.</p>
                 </div>
-                <div className="bg-slate-100 p-1 rounded-lg flex overflow-x-auto max-w-full">
+                <div className="bg-slate-100 p-1 rounded-lg flex">
                     <button 
                         onClick={() => setActiveTab('pipeline')}
-                        className={`px-4 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'pipeline' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                        className={`px-6 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'pipeline' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
                     >
                         <Trello className="w-4 h-4" /> Pipeline
                     </button>
                     <button 
-                        onClick={() => setActiveTab('followup')}
-                        className={`px-4 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'followup' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                        <Clock className="w-4 h-4" /> Follow Up
-                        {upcomingFollowUps.length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 rounded-full">{upcomingFollowUps.length}</span>}
-                    </button>
-                    <button 
-                        onClick={() => setActiveTab('email')}
-                        className={`px-4 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'email' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                        <Mail className="w-4 h-4" /> Email
-                    </button>
-                    <button 
                         onClick={() => setActiveTab('leads')}
-                        className={`px-4 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'leads' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                        className={`px-6 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'leads' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
                     >
                         <List className="w-4 h-4" /> Leads
                     </button>
@@ -212,177 +170,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
                         {renderKanbanColumn('Sent / Negotiation', 'Sent', 'bg-blue-500')}
                         {renderKanbanColumn('Won / Pending Start', 'Won', 'bg-emerald-500')}
                         {renderKanbanColumn('Ongoing Projects', 'Ongoing', 'bg-indigo-500')}
-                    </div>
-                </div>
-            )}
-
-            {/* --- FOLLOW UP VIEW --- */}
-            {activeTab === 'followup' && (
-                <div className="max-w-4xl mx-auto w-full">
-                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                        <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
-                             <AlertCircle className="w-5 h-5 text-orange-500" />
-                             <h2 className="font-bold text-slate-800">Pending Follow Ups</h2>
-                        </div>
-                        <div className="divide-y divide-slate-100">
-                            {upcomingFollowUps.map(p => (
-                                <div key={p.id} className="p-6 flex flex-col md:flex-row justify-between md:items-center hover:bg-orange-50/50 transition-colors gap-4">
-                                    <div>
-                                        <div className="flex items-center gap-2">
-                                            <h3 className="font-bold text-slate-900 text-lg">{p.name}</h3>
-                                            <span className="text-xs bg-slate-100 border border-slate-200 px-2 py-0.5 rounded font-medium text-slate-500">{p.status}</span>
-                                        </div>
-                                        <p className="text-slate-500 flex items-center gap-2 mt-1">
-                                            <User className="w-4 h-4" /> {p.client} 
-                                            <span className="text-slate-300">|</span> 
-                                            <DollarSign className="w-4 h-4" /> ${(p.contractValue || 0).toLocaleString()}
-                                        </p>
-                                    </div>
-                                    <div className="flex flex-col items-end gap-2">
-                                        <div className="flex items-center gap-2 text-orange-600 font-bold bg-orange-100 px-3 py-1 rounded-lg text-sm">
-                                            <Clock className="w-4 h-4" />
-                                            Due: {new Date(p.followUpDate!).toLocaleDateString()}
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <button 
-                                                onClick={() => {
-                                                    const subject = `Follow up: ${p.name}`;
-                                                    const body = `Hello ${p.client.split(' ')[0]},\n\nI wanted to follow up on the estimate for ${p.name}. Do you have any questions?\n\nBest regards,\nCarsan Electric`;
-                                                    window.open(`mailto:${p.contactInfo}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
-                                                }}
-                                                className="text-sm bg-white border border-slate-300 px-3 py-1.5 rounded-lg font-bold text-slate-600 hover:bg-slate-50 flex items-center gap-2"
-                                            >
-                                                <Mail className="w-4 h-4" /> Email Client
-                                            </button>
-                                            <button 
-                                                onClick={() => {
-                                                    if (setProjects) {
-                                                        const nextWeek = new Date();
-                                                        nextWeek.setDate(nextWeek.getDate() + 7);
-                                                        const upd = projects.map(proj => proj.id === p.id ? {...proj, followUpDate: nextWeek.toISOString()} : proj);
-                                                        setProjects(upd);
-                                                    }
-                                                }}
-                                                className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-blue-700"
-                                            >
-                                                Snooze 1 Week
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                            {upcomingFollowUps.length === 0 && (
-                                <div className="p-12 text-center text-slate-400">
-                                    <CheckCircle className="w-12 h-12 mx-auto mb-3 text-emerald-400" />
-                                    <p className="font-medium">All caught up! No pending follow ups.</p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* --- EMAIL VIEW --- */}
-            {activeTab === 'email' && (
-                <div className="flex h-[calc(100vh-240px)] gap-6">
-                    {/* Sidebar List */}
-                    <div className="w-1/3 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
-                        <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-                            <h3 className="font-bold text-slate-800 flex items-center gap-2"><Inbox className="w-4 h-4" /> Inbox</h3>
-                            <button onClick={handleFetchLeads} disabled={isLoading} className="text-slate-500 hover:text-blue-600 disabled:animate-spin">
-                                <RefreshCw className="w-4 h-4" />
-                            </button>
-                        </div>
-                        <div className="overflow-y-auto flex-1 divide-y divide-slate-100">
-                            {leads.filter(l => l.source === 'Outlook').map(lead => (
-                                <div 
-                                    key={lead.id} 
-                                    onClick={() => {
-                                        setSelectedLead(lead);
-                                        setReplySubject(`Re: ${lead.notes?.split('\n')[0].replace('Subject: ', '') || 'Project Inquiry'}`);
-                                    }}
-                                    className={`p-4 cursor-pointer transition-colors hover:bg-blue-50 ${selectedLead?.id === lead.id ? 'bg-blue-50 border-l-4 border-blue-500' : 'border-l-4 border-transparent'}`}
-                                >
-                                    <div className="flex justify-between items-start mb-1">
-                                        <p className="font-bold text-slate-900 text-sm truncate w-2/3">{lead.name}</p>
-                                        <span className="text-[10px] text-slate-400">{new Date(lead.dateAdded).toLocaleDateString()}</span>
-                                    </div>
-                                    <p className="text-xs text-slate-500 truncate">{lead.notes?.split('\n')[0].replace('Subject: ', '') || 'No Subject'}</p>
-                                </div>
-                            ))}
-                            {leads.filter(l => l.source === 'Outlook').length === 0 && (
-                                <div className="p-8 text-center">
-                                    <button onClick={handleFetchLeads} className="text-sm text-blue-600 font-bold hover:underline">Sync Outlook</button>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Email Content */}
-                    <div className="flex-1 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
-                        {selectedLead ? (
-                            <>
-                                <div className="p-6 border-b border-slate-200">
-                                    <div className="flex justify-between items-start">
-                                        <div>
-                                            <h2 className="text-xl font-bold text-slate-900 mb-2">{selectedLead.notes?.split('\n')[0].replace('Subject: ', '')}</h2>
-                                            <div className="flex items-center gap-2 text-sm text-slate-500">
-                                                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">
-                                                    {selectedLead.name.charAt(0)}
-                                                </div>
-                                                <div>
-                                                    <span className="font-bold text-slate-900">{selectedLead.name}</span>
-                                                    <span className="text-slate-400 mx-1">&lt;{selectedLead.email}&gt;</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <button onClick={() => convertToOpportunity(selectedLead)} className="px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold hover:bg-emerald-200">
-                                                Convert to Project
-                                            </button>
-                                            <button onClick={() => deleteLead(selectedLead.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg">
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="flex-1 p-6 overflow-y-auto bg-slate-50">
-                                    <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
-                                        {selectedLead.notes?.split('Preview: ')[1] || selectedLead.notes || "No content."}
-                                    </div>
-                                </div>
-                                <div className="p-4 bg-white border-t border-slate-200">
-                                    <div className="mb-2">
-                                        <label className="text-xs font-bold text-slate-500 uppercase">Reply</label>
-                                        <input 
-                                            value={replySubject} 
-                                            onChange={(e) => setReplySubject(e.target.value)}
-                                            className="w-full text-sm border-b border-slate-200 py-1 mb-2 outline-none font-medium"
-                                        />
-                                        <textarea 
-                                            value={replyBody}
-                                            onChange={(e) => setReplyBody(e.target.value)}
-                                            className="w-full p-3 bg-slate-50 rounded-lg text-sm border border-slate-200 focus:border-blue-500 outline-none h-24 resize-none"
-                                            placeholder="Type your reply..."
-                                        />
-                                    </div>
-                                    <div className="flex justify-end">
-                                        <button 
-                                            onClick={handleSendReply} 
-                                            disabled={sendingEmail}
-                                            className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold text-sm hover:bg-blue-700 flex items-center gap-2 disabled:opacity-50"
-                                        >
-                                            {sendingEmail ? 'Sending...' : <><Send className="w-4 h-4" /> Send Reply</>}
-                                        </button>
-                                    </div>
-                                </div>
-                            </>
-                        ) : (
-                            <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
-                                <Mail className="w-12 h-12 mb-3 text-slate-300" />
-                                <p>Select an email to view</p>
-                            </div>
-                        )}
                     </div>
                 </div>
             )}

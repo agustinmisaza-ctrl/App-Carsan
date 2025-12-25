@@ -61,16 +61,16 @@ const normalizeSharePointStatus = (val: string): ProjectEstimate['status'] => {
     // Lost / Perdido
     if (v.includes('perdido') || v.includes('lost') || v.includes('rechazado') || v.includes('cancel') || v.includes('discard')) return 'Lost';
     
-    // Sent / Enviado / Cotizado
-    if (v.includes('enviado') || v.includes('sent') || v.includes('cotizado') || v.includes('presentada') || v.includes('submitted') || v.includes('waiting')) return 'Sent';
+    // Sent / Enviado / Entregado
+    if (v.includes('enviado') || v.includes('sent') || v.includes('cotizado') || v.includes('presentada') || v.includes('submitted') || v.includes('waiting') || v.includes('entregado')) return 'Sent';
     
     // Ongoing / En Ejecución
     if (v.includes('ejecucion') || v.includes('ongoing') || v.includes('obra') || v.includes('construction') || v.includes('active') || v.includes('curso')) return 'Ongoing';
     
     // Completed / Terminado
-    if (v.includes('completado') || v.includes('completed') || v.includes('terminado') || v.includes('final') || v.includes('entregado')) return 'Completed';
+    if (v.includes('completado') || v.includes('completed') || v.includes('terminado') || v.includes('final')) return 'Completed';
     
-    // Default to Draft if it's "Borrador", "Draft", "En Proceso" (generic), or unknown
+    // Default to Draft (This covers "En Proceso", "Borrador", "Draft")
     return 'Draft';
 };
 

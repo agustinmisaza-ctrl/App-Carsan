@@ -111,8 +111,12 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
             const autoMap = { ...mapping };
             cols.forEach(c => {
                 const name = c.displayName.toLowerCase();
+                
+                // Enhanced auto-mapping including Spanish terms
+                if (name.includes('nombre') || name.includes('proyecto') || name.includes('project') || name.includes('titulo') || name.includes('title')) autoMap.name = c.name;
+
                 if (name.includes('cliente') || name.includes('customer') || name.includes('client')) autoMap.client = c.name;
-                if (name.includes('estado') || name.includes('status')) autoMap.status = c.name;
+                if (name.includes('estado') || name.includes('status') || name.includes('etapa')) autoMap.status = c.name;
                 if (name.includes('valor') || name.includes('value') || name.includes('monto') || name.includes('contract')) autoMap.contractValue = c.name;
                 if (name.includes('direccion') || name.includes('address') || name.includes('ubicacion')) autoMap.address = c.name;
                 if (name.includes('estimador') || name.includes('owner') || name.includes('estimator')) autoMap.estimator = c.name;
