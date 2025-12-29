@@ -1,4 +1,5 @@
 
+
 export enum ViewState {
   DASHBOARD = 'DASHBOARD',
   PROJECTS = 'PROJECTS',
@@ -89,6 +90,15 @@ export interface ProjectMapping {
   dateCreated: string;
   awardedDate: string;
   area: string; // Nueva columna para filtrado
+}
+
+export interface TicketMapping {
+  title: string;       // Maps to note/description
+  client: string;
+  status: string;
+  amount: string;      // Total value
+  dateCreated: string;
+  projectName: string; // To link with existing project
 }
 
 export interface ServiceTicket {

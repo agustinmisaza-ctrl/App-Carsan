@@ -1,10 +1,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { ServiceTicket, ProjectEstimate, EstimateLineItem, User, MaterialItem } from '../types';
-import { Plus, FileText, MapPin, Calendar, CheckCircle, Clock, DollarSign, AlertTriangle, User as UserIcon, Search, ArrowRight, Trash2, Paperclip, Mail, Download } from 'lucide-react';
+import { Plus, FileText, MapPin, Calendar, CheckCircle, Clock, DollarSign, AlertTriangle, User as UserIcon, Search, ArrowRight, Trash2, Paperclip, Mail, Download, Upload, FileSpreadsheet } from 'lucide-react';
 import { generateInvoiceFromNotes } from '../services/geminiService';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 
 interface ServiceModuleProps {
     user: User;
@@ -29,6 +30,8 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
     });
     const [notesInput, setNotesInput] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
+    
+    const excelInputRef = useRef<HTMLInputElement>(null);
 
     // Derived Lists
     const ongoingProjects = projects.filter(p => p.status === 'Ongoing');
@@ -168,6 +171,68 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
         return mat + lab;
     };
 
+    const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const data = event.target?.result;
+                const workbook = XLSX.read(data, { type: 'array' });
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                
+                const newTickets: ServiceTicket[] = jsonData.map((row: any) => {
+                    // Heuristic mapping for Contractor Foreman / Generic Excel
+                    const project = projects.find(p => p.name === row['Project'] || p.name === row['Job']);
+                    
+                    const statusRaw = String(row['Status'] || 'Pending');
+                    let status: ServiceTicket['status'] = 'Sent';
+                    if (statusRaw.toLowerCase().includes('approv')) status = 'Authorized';
+                    if (statusRaw.toLowerCase().includes('reject') || statusRaw.toLowerCase().includes('denied')) status = 'Denied';
+                    if (statusRaw.toLowerCase().includes('complete')) status = 'Completed';
+                    if (statusRaw.toLowerCase().includes('schedule')) status = 'Scheduled';
+
+                    const amount = parseFloat(row['Total'] || row['Amount'] || row['Total Amount'] || row['Cost'] || '0');
+                    const title = row['Title'] || row['Description'] || row['Subject'] || row['Change Order Name'] || 'Imported Change Order';
+                    const coNumber = row['Number'] || row['#'] || row['CO#'] || row['Ref'] || '';
+                    
+                    return {
+                        id: `CO-IMP-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+                        type: 'Change Order',
+                        projectId: project ? project.id : undefined,
+                        clientName: project ? project.client : (row['Client'] || row['Customer'] || 'Unknown'),
+                        address: project ? project.address : (row['Address'] || 'Miami, FL'),
+                        status: status,
+                        technician: user.name || 'Imported',
+                        dateCreated: row['Date'] ? new Date(row['Date']).toISOString() : new Date().toISOString(),
+                        items: [{
+                            id: `item-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+                            description: title,
+                            quantity: 1,
+                            unitMaterialCost: amount, // Lump sum into material for simplicity
+                            unitLaborHours: 0,
+                            laborRate: 0
+                        }],
+                        photos: [],
+                        notes: `Imported from Excel. Ref: ${coNumber}`,
+                        laborRate: 85
+                    };
+                });
+
+                setTickets([...tickets, ...newTickets]);
+                alert(`Successfully imported ${newTickets.length} change orders.`);
+                if(excelInputRef.current) excelInputRef.current.value = '';
+            } catch (error) {
+                console.error(error);
+                alert("Failed to parse Excel file.");
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    };
+
     return (
         <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
             {/* Header */}
@@ -255,8 +320,8 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
             {/* ALL TICKETS VIEW */}
             {activeTab === 'tickets' && (
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200">
-                    <div className="p-4 border-b border-slate-200 flex justify-between items-center">
-                        <div className="relative w-64">
+                    <div className="p-4 border-b border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4">
+                        <div className="relative w-full md:w-64">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                             <input 
                                 value={searchTerm}
@@ -265,9 +330,25 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
                                 className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500"
                             />
                         </div>
-                        <button onClick={() => setShowCreateModal(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-700 flex items-center gap-2">
-                            <Plus className="w-4 h-4" /> New Ticket
-                        </button>
+                        <div className="flex gap-2 w-full md:w-auto">
+                             <button 
+                                onClick={() => excelInputRef.current?.click()}
+                                className="bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-slate-50 flex items-center justify-center gap-2 flex-1 md:flex-none"
+                            >
+                                <FileSpreadsheet className="w-4 h-4 text-emerald-600" /> Import Excel
+                            </button>
+                            <input 
+                                type="file" 
+                                ref={excelInputRef} 
+                                className="hidden" 
+                                accept=".xlsx, .xls, .csv" 
+                                onChange={handleExcelUpload} 
+                            />
+                            
+                            <button onClick={() => setShowCreateModal(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-700 flex items-center justify-center gap-2 flex-1 md:flex-none">
+                                <Plus className="w-4 h-4" /> New Ticket
+                            </button>
+                        </div>
                     </div>
                     <div className="divide-y divide-slate-100">
                         {recentTickets.filter(t => t.clientName.toLowerCase().includes(searchTerm.toLowerCase()) || t.id.includes(searchTerm)).map(t => (
@@ -289,6 +370,11 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
                                 </div>
                             </div>
                         ))}
+                        {recentTickets.length === 0 && (
+                             <div className="p-8 text-center text-slate-400">
+                                <p>No tickets found. Create a new one or import from Excel.</p>
+                             </div>
+                        )}
                     </div>
                 </div>
             )}

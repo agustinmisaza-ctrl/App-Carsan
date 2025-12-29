@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { Search, Database, Loader2, Link as LinkIcon, CheckCircle, RefreshCw, ChevronRight, LayoutList, Settings2, Save, Filter, Settings, LogIn } from 'lucide-react';
-import { searchSharePointSites, getSharePointLists, getListColumns, fetchMappedListItems, SPSite, SPList, SPColumn } from '../services/sharepointService';
-import { ProjectMapping, ProjectEstimate, MaterialItem, ServiceTicket, PurchaseRecord } from '../types';
+import { Search, Database, Loader2, Link as LinkIcon, CheckCircle, RefreshCw, ChevronRight, LayoutList, Settings2, Save, Filter, Settings, LogIn, FileText, Briefcase } from 'lucide-react';
+import { searchSharePointSites, getSharePointLists, getListColumns, fetchMappedListItems, fetchMappedTickets, SPSite, SPList, SPColumn } from '../services/sharepointService';
+import { ProjectMapping, TicketMapping, ProjectEstimate, MaterialItem, ServiceTicket, PurchaseRecord } from '../types';
 import { getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId } from '../services/emailIntegration';
 
 interface SharePointConnectProps {
@@ -10,11 +10,13 @@ interface SharePointConnectProps {
     setProjects: (projects: ProjectEstimate[]) => void;
     materials?: MaterialItem[];
     tickets?: ServiceTicket[];
+    setTickets?: (tickets: ServiceTicket[]) => void;
     purchases?: PurchaseRecord[];
     setPurchases?: (purchases: PurchaseRecord[]) => void;
 }
 
-export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, setProjects, materials, tickets, purchases, setPurchases }) => {
+export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, setProjects, materials, tickets, setTickets, purchases, setPurchases }) => {
+    const [importMode, setImportMode] = useState<'projects' | 'tickets'>('projects');
     const [step, setStep] = useState<0 | 1 | 2>(0); 
     const [sites, setSites] = useState<SPSite[]>([]);
     const [lists, setLists] = useState<SPList[]>([]);
@@ -27,18 +29,18 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
     const [tenantId, setTenantId] = useState(getStoredTenantId() || '');
     const [clientId, setClientId] = useState(getStoredClientId() || '');
 
-    const [mapping, setMapping] = useState<ProjectMapping>(() => {
+    // Mappings
+    const [projectMapping, setProjectMapping] = useState<ProjectMapping>(() => {
         const saved = localStorage.getItem('carsan_sp_mapping');
         return saved ? JSON.parse(saved) : {
-            name: 'Title',
-            client: '',
-            status: '',
-            contractValue: '',
-            address: '',
-            estimator: '',
-            dateCreated: '',
-            awardedDate: '',
-            area: ''
+            name: 'Title', client: '', status: '', contractValue: '', address: '', estimator: '', dateCreated: '', awardedDate: '', area: ''
+        };
+    });
+
+    const [ticketMapping, setTicketMapping] = useState<TicketMapping>(() => {
+        const saved = localStorage.getItem('carsan_sp_ticket_mapping');
+        return saved ? JSON.parse(saved) : {
+            title: 'Title', client: '', status: '', amount: '', dateCreated: '', projectName: ''
         };
     });
 
@@ -46,7 +48,6 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        // Only attempt auto-connect if we have configuration
         if (getStoredClientId()) {
             handleSearchSites(true);
         } else {
@@ -62,15 +63,11 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
             setSites(results);
         } catch (e: any) {
             console.error("SharePoint Search Error:", e);
-            // If auto-connect fails (likely popup blocked), we show a specific message
-            // or just the standard error, but the user can now click 'Retry' to fix it.
             let msg = e.message || "Error al buscar sitios.";
             if (isAuto && (msg.includes("interaction") || msg.includes("popup") || msg.toLowerCase().includes("failed to fetch"))) {
                  msg = "Se requiere iniciar sesión. Por favor haz clic en 'Conectar' para autorizar.";
             }
             setError(msg);
-            
-            // If error implies missing config, open settings automatically
             if (e.message?.includes('Client ID')) {
                 setShowSettings(true);
             }
@@ -84,7 +81,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         setStoredClientId(clientId.trim());
         setShowSettings(false);
         setError(null);
-        handleSearchSites(false); // Manual trigger
+        handleSearchSites(false); 
     };
 
     const handleSelectSite = async (site: SPSite) => {
@@ -108,22 +105,30 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
             const cols = await getListColumns(selectedSite!.id, list.id);
             setColumns(cols);
             
-            const autoMap = { ...mapping };
-            cols.forEach(c => {
-                const name = c.displayName.toLowerCase();
-                
-                // Enhanced auto-mapping including Spanish terms
-                if (name.includes('nombre') || name.includes('proyecto') || name.includes('project') || name.includes('titulo') || name.includes('title')) autoMap.name = c.name;
-
-                if (name.includes('cliente') || name.includes('customer') || name.includes('client')) autoMap.client = c.name;
-                if (name.includes('estado') || name.includes('status') || name.includes('etapa')) autoMap.status = c.name;
-                if (name.includes('valor') || name.includes('value') || name.includes('monto') || name.includes('contract')) autoMap.contractValue = c.name;
-                if (name.includes('direccion') || name.includes('address') || name.includes('ubicacion')) autoMap.address = c.name;
-                if (name.includes('estimador') || name.includes('owner') || name.includes('estimator')) autoMap.estimator = c.name;
-                if (name.includes('creacion') || name.includes('created') || name.includes('fecha')) autoMap.dateCreated = c.name;
-                if (name.includes('area') || name.includes('ubicacion') || name.includes('zona')) autoMap.area = c.name;
-            });
-            setMapping(autoMap);
+            if (importMode === 'projects') {
+                const autoMap = { ...projectMapping };
+                cols.forEach(c => {
+                    const name = c.displayName.toLowerCase();
+                    if (name.includes('nombre') || name.includes('proyecto') || name.includes('project') || name.includes('titulo')) autoMap.name = c.name;
+                    if (name.includes('cliente') || name.includes('customer')) autoMap.client = c.name;
+                    if (name.includes('estado') || name.includes('status') || name.includes('etapa')) autoMap.status = c.name;
+                    if (name.includes('valor') || name.includes('value') || name.includes('monto')) autoMap.contractValue = c.name;
+                    if (name.includes('direccion') || name.includes('address')) autoMap.address = c.name;
+                    if (name.includes('area')) autoMap.area = c.name;
+                });
+                setProjectMapping(autoMap);
+            } else {
+                 const autoMap = { ...ticketMapping };
+                 cols.forEach(c => {
+                    const name = c.displayName.toLowerCase();
+                    if (name.includes('descripcion') || name.includes('description') || name.includes('titulo')) autoMap.title = c.name;
+                    if (name.includes('cliente') || name.includes('customer')) autoMap.client = c.name;
+                    if (name.includes('estado') || name.includes('status')) autoMap.status = c.name;
+                    if (name.includes('monto') || name.includes('amount') || name.includes('total')) autoMap.amount = c.name;
+                    if (name.includes('proyecto') || name.includes('project')) autoMap.projectName = c.name;
+                 });
+                 setTicketMapping(autoMap);
+            }
             setStep(2);
         } catch (e: any) {
             setError(e.message || "No se pudieron obtener las columnas de la lista.");
@@ -136,10 +141,18 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         if (!selectedSite || !selectedList) return;
         setIsLoading(true);
         try {
-            localStorage.setItem('carsan_sp_mapping', JSON.stringify(mapping));
-            const cloudProjects = await fetchMappedListItems(selectedSite.id, selectedList.id, mapping);
-            setProjects(cloudProjects);
-            alert(`Sincronización exitosa. Se cargaron ${cloudProjects.length} proyectos (Filtrados por AREA=USA).`);
+            if (importMode === 'projects') {
+                localStorage.setItem('carsan_sp_mapping', JSON.stringify(projectMapping));
+                const cloudProjects = await fetchMappedListItems(selectedSite.id, selectedList.id, projectMapping);
+                setProjects(cloudProjects);
+                alert(`Sincronización exitosa. Se cargaron ${cloudProjects.length} proyectos.`);
+            } else {
+                if (!setTickets) return;
+                localStorage.setItem('carsan_sp_ticket_mapping', JSON.stringify(ticketMapping));
+                const cloudTickets = await fetchMappedTickets(selectedSite.id, selectedList.id, ticketMapping, projects);
+                setTickets(cloudTickets);
+                alert(`Sincronización exitosa. Se cargaron ${cloudTickets.length} Change Orders.`);
+            }
         } catch (e: any) {
             setError("Error durante la sincronización: " + e.message);
         } finally {
@@ -147,15 +160,15 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         }
     };
 
-    const MappingRow = ({ label, field, isFilter = false }: { label: string, field: keyof ProjectMapping, isFilter?: boolean }) => (
+    const MappingRow = ({ label, value, onChange, isFilter = false }: { label: string, value: string, onChange: (val: string) => void, isFilter?: boolean }) => (
         <div className={`flex flex-col md:flex-row md:items-center justify-between p-4 ${isFilter ? 'bg-orange-50 border-orange-200' : 'bg-slate-50 border-slate-200'} border rounded-xl gap-4`}>
             <span className="text-sm font-bold text-slate-700 flex items-center gap-2">
                 {isFilter ? <Filter className="w-4 h-4 text-orange-500" /> : <Settings2 className="w-4 h-4 text-blue-500" />} {label}
             </span>
             <div className="flex items-center gap-2">
                 <select 
-                    value={mapping[field]} 
-                    onChange={(e) => setMapping({...mapping, [field]: e.target.value})}
+                    value={value} 
+                    onChange={(e) => onChange(e.target.value)}
                     className="bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none md:w-64"
                 >
                     <option value="">-- Seleccionar Columna --</option>
@@ -175,8 +188,8 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                             <Database className="w-6 h-6" />
                         </div>
                         <div>
-                            <h1 className="text-2xl font-bold text-slate-900">SharePoint Schema Mapper</h1>
-                            <p className="text-sm text-slate-500">Filtrado inteligente: AREA = USA</p>
+                            <h1 className="text-2xl font-bold text-slate-900">SharePoint Import</h1>
+                            <p className="text-sm text-slate-500">Conecta tus listas de SharePoint Online</p>
                         </div>
                     </div>
                     <button 
@@ -222,12 +235,28 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                     </div>
                 )}
 
+                {/* Import Mode Toggle */}
+                <div className="flex bg-slate-100 p-1 rounded-xl mb-6 w-full md:w-fit">
+                    <button 
+                        onClick={() => { setImportMode('projects'); setStep(0); }}
+                        className={`flex-1 md:flex-none px-6 py-2 rounded-lg text-sm font-bold flex items-center gap-2 justify-center transition-all ${importMode === 'projects' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                        <Briefcase className="w-4 h-4" /> Import Projects
+                    </button>
+                    <button 
+                        onClick={() => { setImportMode('tickets'); setStep(0); }}
+                        className={`flex-1 md:flex-none px-6 py-2 rounded-lg text-sm font-bold flex items-center gap-2 justify-center transition-all ${importMode === 'tickets' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                        <FileText className="w-4 h-4" /> Import Change Orders
+                    </button>
+                </div>
+
                 <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400 mb-8 overflow-x-auto pb-2">
                     <span className={step === 0 ? 'text-blue-600' : ''}>1. Sitio</span>
                     <ChevronRight className="w-4 h-4" />
                     <span className={step === 1 ? 'text-blue-600' : ''}>2. Lista</span>
                     <ChevronRight className="w-4 h-4" />
-                    <span className={step === 2 ? 'text-blue-600' : ''}>3. Mapeo y Filtros</span>
+                    <span className={step === 2 ? 'text-blue-600' : ''}>3. Mapeo</span>
                 </div>
 
                 {isLoading && (
@@ -313,29 +342,43 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                                         <CheckCircle className="w-6 h-6 text-emerald-500" />
                                         <div>
                                             <p className="text-sm font-bold text-emerald-800">Lista: {selectedList?.displayName}</p>
-                                            <p className="text-[10px] text-emerald-600 uppercase tracking-wider">Configura el filtro de Área abajo</p>
+                                            <p className="text-[10px] text-emerald-600 uppercase tracking-wider">
+                                                {importMode === 'projects' ? 'Filtro AREA = USA activo' : 'Mapeo de Change Orders'}
+                                            </p>
                                         </div>
                                     </div>
                                     <button onClick={() => setStep(1)} className="text-xs font-bold text-emerald-700 underline">Cambiar Lista</button>
                                 </div>
 
-                                <div className="space-y-3">
-                                    <MappingRow label="Columna de AREA (Filtro)" field="area" isFilter={true} />
-                                    <div className="h-px bg-slate-100 my-4"></div>
-                                    <MappingRow label="Nombre del Proyecto" field="name" />
-                                    <MappingRow label="Nombre del Cliente" field="client" />
-                                    <MappingRow label="Estado Actual" field="status" />
-                                    <MappingRow label="Monto / Valor" field="contractValue" />
-                                    <MappingRow label="Dirección / Ubicación" field="address" />
-                                    <MappingRow label="Fecha de Creación" field="dateCreated" />
-                                </div>
+                                {importMode === 'projects' ? (
+                                    <div className="space-y-3">
+                                        <MappingRow label="Columna de AREA (Filtro)" value={projectMapping.area} onChange={(v) => setProjectMapping({...projectMapping, area: v})} isFilter={true} />
+                                        <div className="h-px bg-slate-100 my-4"></div>
+                                        <MappingRow label="Nombre del Proyecto" value={projectMapping.name} onChange={(v) => setProjectMapping({...projectMapping, name: v})} />
+                                        <MappingRow label="Nombre del Cliente" value={projectMapping.client} onChange={(v) => setProjectMapping({...projectMapping, client: v})} />
+                                        <MappingRow label="Estado Actual" value={projectMapping.status} onChange={(v) => setProjectMapping({...projectMapping, status: v})} />
+                                        <MappingRow label="Monto / Valor" value={projectMapping.contractValue} onChange={(v) => setProjectMapping({...projectMapping, contractValue: v})} />
+                                        <MappingRow label="Dirección / Ubicación" value={projectMapping.address} onChange={(v) => setProjectMapping({...projectMapping, address: v})} />
+                                        <MappingRow label="Fecha de Creación" value={projectMapping.dateCreated} onChange={(v) => setProjectMapping({...projectMapping, dateCreated: v})} />
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        <MappingRow label="Descripción / Título" value={ticketMapping.title} onChange={(v) => setTicketMapping({...ticketMapping, title: v})} />
+                                        <MappingRow label="Cliente" value={ticketMapping.client} onChange={(v) => setTicketMapping({...ticketMapping, client: v})} />
+                                        <MappingRow label="Estado (Aprobado/Rechazado)" value={ticketMapping.status} onChange={(v) => setTicketMapping({...ticketMapping, status: v})} />
+                                        <MappingRow label="Monto Total ($)" value={ticketMapping.amount} onChange={(v) => setTicketMapping({...ticketMapping, amount: v})} />
+                                        <MappingRow label="Fecha Creación" value={ticketMapping.dateCreated} onChange={(v) => setTicketMapping({...ticketMapping, dateCreated: v})} />
+                                        <MappingRow label="Nombre Proyecto (Link)" value={ticketMapping.projectName} onChange={(v) => setTicketMapping({...ticketMapping, projectName: v})} />
+                                    </div>
+                                )}
 
                                 <div className="pt-8 flex justify-end">
                                     <button 
                                         onClick={handleSaveMappingAndSync}
                                         className="bg-slate-900 text-white px-8 py-3 rounded-xl font-bold hover:bg-slate-800 flex items-center gap-3 shadow-lg"
                                     >
-                                        <Save className="w-5 h-5" /> Guardar y Filtrar Importación
+                                        <Save className="w-5 h-5" /> 
+                                        {importMode === 'projects' ? 'Importar Proyectos' : 'Importar Change Orders'}
                                     </button>
                                 </div>
                             </div>

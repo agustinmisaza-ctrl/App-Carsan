@@ -1,6 +1,6 @@
 
 import { getGraphToken } from "./emailIntegration";
-import { ProjectEstimate, ProjectMapping } from "../types";
+import { ProjectEstimate, ProjectMapping, ServiceTicket, TicketMapping } from "../types";
 
 export interface SPSite { id: string; displayName: string; webUrl: string; }
 export interface SPList { id: string; displayName: string; }
@@ -74,6 +74,16 @@ const normalizeSharePointStatus = (val: string): ProjectEstimate['status'] => {
     return 'Draft';
 };
 
+const normalizeTicketStatus = (val: string): ServiceTicket['status'] => {
+    if (!val) return 'Sent';
+    const v = String(val).toLowerCase().trim();
+    if (v.includes('aprobado') || v.includes('approved') || v.includes('authorized') || v.includes('autorizado')) return 'Authorized';
+    if (v.includes('rechazado') || v.includes('denied') || v.includes('cancelled')) return 'Denied';
+    if (v.includes('completado') || v.includes('completed') || v.includes('terminado')) return 'Completed';
+    if (v.includes('agendado') || v.includes('scheduled')) return 'Scheduled';
+    return 'Sent';
+};
+
 export const fetchMappedListItems = async (
     siteId: string, 
     listId: string, 
@@ -95,10 +105,24 @@ export const fetchMappedListItems = async (
         const rawStatus = f[mapping.status];
         const normalizedStatus = normalizeSharePointStatus(rawStatus);
 
+        // Robust Name Resolution
+        let projName = f[mapping.name];
+        if (!projName) projName = f['Title'];
+        if (!projName) projName = f['LinkTitle'];
+        if (!projName) projName = f['Nombre'];
+        if (!projName) projName = f['Proyecto'];
+        if (!projName) projName = 'Sin Nombre';
+
+        // Robust Client Resolution
+        let clientName = f[mapping.client];
+        if (!clientName) clientName = f['Cliente'];
+        if (!clientName) clientName = f['Customer'];
+        if (!clientName) clientName = 'Desconocido';
+
         return {
             id: `sp-${item.id}`,
-            name: f[mapping.name] || 'Sin Nombre',
-            client: f[mapping.client] || 'Desconocido',
+            name: projName,
+            client: clientName,
             status: normalizedStatus,
             contractValue: parseFloat(f[mapping.contractValue]) || 0,
             address: f[mapping.address] || 'Miami, FL',
@@ -108,6 +132,48 @@ export const fetchMappedListItems = async (
             items: [],
             laborRate: 75
         } as ProjectEstimate;
+    });
+};
+
+export const fetchMappedTickets = async (
+    siteId: string, 
+    listId: string, 
+    mapping: TicketMapping,
+    existingProjects: ProjectEstimate[] = []
+): Promise<ServiceTicket[]> => {
+    const items = await getListItems(siteId, listId);
+    
+    return items.map(item => {
+        const f = item.fields;
+        const normalizedStatus = normalizeTicketStatus(f[mapping.status]);
+        const amount = parseFloat(f[mapping.amount]) || 0;
+        const ticketTitle = f[mapping.title] || 'Change Order';
+        
+        // Try to link to a project
+        const projectName = f[mapping.projectName];
+        const linkedProject = existingProjects.find(p => p.name === projectName || p.id === projectName);
+        
+        return {
+            id: `sp-ticket-${item.id}`,
+            type: 'Change Order',
+            status: normalizedStatus,
+            clientName: f[mapping.client] || (linkedProject ? linkedProject.client : 'Unknown Client'),
+            projectId: linkedProject ? linkedProject.id : '',
+            address: linkedProject ? linkedProject.address : 'Miami, FL',
+            technician: 'Imported',
+            dateCreated: f[mapping.dateCreated] || item.createdDateTime || new Date().toISOString(),
+            laborRate: 85,
+            notes: ticketTitle,
+            items: [{
+                id: `item-${item.id}`,
+                description: ticketTitle,
+                quantity: 1,
+                unitMaterialCost: amount, // Put full value in material cost for simplicity
+                unitLaborHours: 0,
+                laborRate: 0
+            }],
+            photos: []
+        };
     });
 };
 
