@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { ServiceTicket, ProjectEstimate, EstimateLineItem, User, MaterialItem } from '../types';
-import { Plus, FileText, MapPin, Calendar, CheckCircle, Clock, DollarSign, AlertTriangle, User as UserIcon, Search, ArrowRight, Trash2, Paperclip, Mail, Download, Upload, FileSpreadsheet } from 'lucide-react';
+import { Plus, FileText, MapPin, Calendar, CheckCircle, Clock, DollarSign, AlertTriangle, User as UserIcon, Search, ArrowRight, Trash2, Paperclip, Mail, Download, Upload, FileSpreadsheet, RefreshCw } from 'lucide-react';
 import { generateInvoiceFromNotes } from '../services/geminiService';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -76,6 +76,13 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
         setShowCreateModal(false);
         setNewTicket({ type: 'Change Order', status: 'Sent', items: [], laborRate: 85 });
         setNotesInput('');
+    };
+
+    const handleClearAllTickets = () => {
+        if (confirm("Are you sure you want to delete ALL tickets? This action cannot be undone.")) {
+            setTickets([]);
+            alert("All tickets have been erased.");
+        }
     };
 
     const handleGenerateInvoice = async () => {
@@ -183,47 +190,128 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
                 const sheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[sheetName];
                 const jsonData = XLSX.utils.sheet_to_json(worksheet);
-                
-                const newTickets: ServiceTicket[] = jsonData.map((row: any) => {
-                    // Heuristic mapping for Contractor Foreman / Generic Excel
-                    const project = projects.find(p => p.name === row['Project'] || p.name === row['Job']);
-                    
-                    const statusRaw = String(row['Status'] || 'Pending');
-                    let status: ServiceTicket['status'] = 'Sent';
-                    if (statusRaw.toLowerCase().includes('approv')) status = 'Authorized';
-                    if (statusRaw.toLowerCase().includes('reject') || statusRaw.toLowerCase().includes('denied')) status = 'Denied';
-                    if (statusRaw.toLowerCase().includes('complete')) status = 'Completed';
-                    if (statusRaw.toLowerCase().includes('schedule')) status = 'Scheduled';
 
-                    const amount = parseFloat(row['Total'] || row['Amount'] || row['Total Amount'] || row['Cost'] || '0');
-                    const title = row['Title'] || row['Description'] || row['Subject'] || row['Change Order Name'] || 'Imported Change Order';
-                    const coNumber = row['Number'] || row['#'] || row['CO#'] || row['Ref'] || '';
+                if (jsonData.length === 0) {
+                    alert("Excel file appears to be empty.");
+                    return;
+                }
+                
+                // Helper to loosely matching keys
+                const getValue = (row: any, keywords: string[]): any => {
+                    const keys = Object.keys(row);
+                    // 1. Exact match
+                    for (const k of keywords) {
+                        if (row[k] !== undefined) return row[k];
+                    }
+                    // 2. Case insensitive match
+                    for (const k of keywords) {
+                        const match = keys.find(key => key.toLowerCase() === k.toLowerCase());
+                        if (match) return row[match];
+                    }
+                    // 3. Partial inclusion match
+                    for (const k of keywords) {
+                        const match = keys.find(key => key.toLowerCase().includes(k.toLowerCase()));
+                        if (match) return row[match];
+                    }
+                    return undefined;
+                };
+                
+                let updatedCount = 0;
+                let addedCount = 0;
+                const updatedTickets = [...tickets];
+
+                jsonData.forEach((row: any) => {
+                    // Smart Matching Logic
                     
-                    return {
-                        id: `CO-IMP-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+                    // 1. Identify Project
+                    const rawProject = getValue(row, ['Project', 'Job', 'Job Name', 'Project Name']);
+                    const project = projects.find(p => 
+                        (rawProject && p.name.toLowerCase().includes(String(rawProject).toLowerCase())) 
+                    );
+
+                    // 2. Identify Client
+                    let clientName = project?.client;
+                    if (!clientName) {
+                        clientName = getValue(row, ['Client', 'Customer', 'Bill To', 'Customer Name', 'Client Name']);
+                    }
+                    if (!clientName) clientName = 'Unknown Client';
+
+                    // 3. Status
+                    const statusRaw = String(getValue(row, ['Status', 'State', 'Stage']) || 'Pending');
+                    let status: ServiceTicket['status'] = 'Sent';
+                    const s = statusRaw.toLowerCase();
+                    if (s.includes('approv') || s.includes('auth') || s.includes('won') || s.includes('accept')) status = 'Authorized';
+                    else if (s.includes('reject') || s.includes('denied') || s.includes('lost')) status = 'Denied';
+                    else if (s.includes('complete') || s.includes('done') || s.includes('paid')) status = 'Completed';
+                    else if (s.includes('sched')) status = 'Scheduled';
+
+                    // 4. Amount
+                    const amountRaw = getValue(row, ['Total', 'Amount', 'Cost', 'Price', 'Value', 'Est. Total', 'Total Amount']);
+                    let amount = 0;
+                    if (typeof amountRaw === 'number') amount = amountRaw;
+                    else if (typeof amountRaw === 'string') amount = parseFloat(amountRaw.replace(/[$,]/g, '')) || 0;
+
+                    // 5. Title/Description
+                    let title = getValue(row, ['Title', 'Description', 'Subject', 'Name', 'Change Order Name', 'CO Title']);
+                    if (!title) title = getValue(row, ['Note', 'Notes', 'Remarks']);
+                    if (!title) title = 'Imported Change Order';
+
+                    // 6. Number/ID - Critical for updates
+                    const coNumber = getValue(row, ['Number', '#', 'CO#', 'ID', 'Reference', 'Ref']);
+
+                    // 7. Date
+                    const dateRaw = getValue(row, ['Date', 'Created', 'Issued', 'Date Created']);
+                    let dateCreated = new Date().toISOString();
+                    if (dateRaw) {
+                        if (typeof dateRaw === 'number') {
+                            dateCreated = new Date(Math.round((dateRaw - 25569) * 86400 * 1000)).toISOString();
+                        } else {
+                             const parsed = new Date(dateRaw);
+                             if (!isNaN(parsed.getTime())) dateCreated = parsed.toISOString();
+                        }
+                    }
+
+                    const ticketObj: ServiceTicket = {
+                        id: coNumber ? `CO-EXCEL-${coNumber}` : `CO-IMP-${Date.now()}-${Math.floor(Math.random()*1000)}`,
                         type: 'Change Order',
                         projectId: project ? project.id : undefined,
-                        clientName: project ? project.client : (row['Client'] || row['Customer'] || 'Unknown'),
-                        address: project ? project.address : (row['Address'] || 'Miami, FL'),
+                        clientName: String(clientName),
+                        address: project ? project.address : (getValue(row, ['Address', 'Location', 'Site']) || 'Miami, FL'),
                         status: status,
                         technician: user.name || 'Imported',
-                        dateCreated: row['Date'] ? new Date(row['Date']).toISOString() : new Date().toISOString(),
+                        dateCreated: dateCreated,
                         items: [{
                             id: `item-${Date.now()}-${Math.floor(Math.random()*1000)}`,
-                            description: title,
+                            description: String(title),
                             quantity: 1,
-                            unitMaterialCost: amount, // Lump sum into material for simplicity
+                            unitMaterialCost: amount, 
                             unitLaborHours: 0,
                             laborRate: 0
                         }],
                         photos: [],
-                        notes: `Imported from Excel. Ref: ${coNumber}`,
+                        notes: `Imported from Excel. Ref: ${coNumber || 'N/A'}`,
                         laborRate: 85
                     };
+
+                    // UPSERT LOGIC
+                    const existingIndex = updatedTickets.findIndex(t => 
+                        (coNumber && t.id === `CO-EXCEL-${coNumber}`) || 
+                        (coNumber && t.notes.includes(`Ref: ${coNumber}`))
+                    );
+
+                    if (existingIndex >= 0) {
+                        // Update existing
+                        updatedTickets[existingIndex] = { ...updatedTickets[existingIndex], ...ticketObj, id: updatedTickets[existingIndex].id }; // Keep original ID if found
+                        updatedCount++;
+                    } else {
+                        // Add new
+                        updatedTickets.push(ticketObj);
+                        addedCount++;
+                    }
                 });
 
-                setTickets([...tickets, ...newTickets]);
-                alert(`Successfully imported ${newTickets.length} change orders.`);
+                setTickets(updatedTickets);
+                alert(`Import Complete: ${addedCount} added, ${updatedCount} updated.`);
                 if(excelInputRef.current) excelInputRef.current.value = '';
             } catch (error) {
                 console.error(error);
@@ -332,10 +420,17 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
                         </div>
                         <div className="flex gap-2 w-full md:w-auto">
                              <button 
+                                onClick={handleClearAllTickets}
+                                className="bg-white border border-red-200 text-red-700 px-3 py-2 rounded-lg font-bold text-sm hover:bg-red-50 flex items-center justify-center gap-2 flex-initial"
+                                title="Erase All Tickets"
+                            >
+                                <Trash2 className="w-4 h-4" /> Erase All
+                            </button>
+                             <button 
                                 onClick={() => excelInputRef.current?.click()}
                                 className="bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-slate-50 flex items-center justify-center gap-2 flex-1 md:flex-none"
                             >
-                                <FileSpreadsheet className="w-4 h-4 text-emerald-600" /> Import Excel
+                                <FileSpreadsheet className="w-4 h-4 text-emerald-600" /> Import/Update Excel
                             </button>
                             <input 
                                 type="file" 

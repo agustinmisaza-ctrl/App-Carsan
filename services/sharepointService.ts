@@ -81,6 +81,7 @@ const normalizeTicketStatus = (val: string): ServiceTicket['status'] => {
     if (v.includes('rechazado') || v.includes('denied') || v.includes('cancelled')) return 'Denied';
     if (v.includes('completado') || v.includes('completed') || v.includes('terminado')) return 'Completed';
     if (v.includes('agendado') || v.includes('scheduled')) return 'Scheduled';
+    // If it mentions Change Order but no specific status, assume Sent/Pending
     return 'Sent';
 };
 
@@ -145,7 +146,15 @@ export const fetchMappedTickets = async (
     
     return items.map(item => {
         const f = item.fields;
-        const normalizedStatus = normalizeTicketStatus(f[mapping.status]);
+        
+        // STRICT FILTER: Check if the 'status' (ETAPA) column contains "Change Order"
+        // This ensures we only pick up items marked specifically as Change Orders in SharePoint
+        const rawStatus = String(f[mapping.status] || '');
+        if (!rawStatus.toLowerCase().includes('change order')) {
+            return null;
+        }
+
+        const normalizedStatus = normalizeTicketStatus(rawStatus);
         const amount = parseFloat(f[mapping.amount]) || 0;
         const ticketTitle = f[mapping.title] || 'Change Order';
         
@@ -153,7 +162,7 @@ export const fetchMappedTickets = async (
         const projectName = f[mapping.projectName];
         const linkedProject = existingProjects.find(p => p.name === projectName || p.id === projectName);
         
-        return {
+        const ticket: ServiceTicket = {
             id: `sp-ticket-${item.id}`,
             type: 'Change Order',
             status: normalizedStatus,
@@ -174,7 +183,8 @@ export const fetchMappedTickets = async (
             }],
             photos: []
         };
-    });
+        return ticket;
+    }).filter((item): item is ServiceTicket => item !== null);
 };
 
 export const ensureCarsanLists = async (siteId: string, forceToken = false) => {
