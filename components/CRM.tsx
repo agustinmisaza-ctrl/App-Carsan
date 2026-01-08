@@ -1,9 +1,9 @@
 
 import React, { useState } from 'react';
 import { Lead, ProjectEstimate } from '../types';
-import { fetchOutlookEmails } from '../services/emailIntegration';
+import { fetchOutlookEmails, sendOutlookEmail } from '../services/emailIntegration';
 import { analyzeIncomingEmail } from '../services/geminiService';
-import { Trello, List, Search, RefreshCw, Briefcase, Mail, CheckCircle, XCircle, ArrowRight, Trash2, Eye, Sparkles, MapPin, Phone, AlertTriangle, X } from 'lucide-react';
+import { Trello, List, Search, RefreshCw, Briefcase, Mail, CheckCircle, XCircle, ArrowRight, Trash2, Eye, Sparkles, MapPin, Phone, AlertTriangle, X, Send, Plus, Loader2 } from 'lucide-react';
 
 interface CRMProps {
     leads: Lead[];
@@ -23,6 +23,12 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
     // Detailed View State
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
 
+    // Email & Manual Entry State
+    const [emailCompose, setEmailCompose] = useState<{to: string, name: string, subject: string, body: string} | null>(null);
+    const [isSendingEmail, setIsSendingEmail] = useState(false);
+    const [showAddLead, setShowAddLead] = useState(false);
+    const [newLead, setNewLead] = useState<Partial<Lead>>({ name: '', email: '', company: '', phone: '', source: 'Manual', notes: '' });
+
     const handleFetchLeads = async () => {
         setIsLoading(true);
         setAnalysisProgress('Connecting to Outlook...');
@@ -31,12 +37,11 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
             const data = await fetchOutlookEmails();
             setAnalysisProgress(`Fetched ${data.length} emails. Analyzing with AI...`);
             
-            // 2. Enhance with AI (Processing limited to most recent 5 to save time/tokens if needed, 
-            //    but let's do all new ones for better UX as requested)
+            // 2. Enhance with AI
             const enhancedLeads: Lead[] = [];
             
             for (const emailLead of data) {
-                // Check if we already have this lead to avoid re-analyzing duplicates
+                // Check if we already have this lead
                 const exists = leads.find(l => l.id === emailLead.id);
                 if (exists) {
                     enhancedLeads.push(exists);
@@ -63,24 +68,19 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
                 enhancedLeads.push({
                     ...emailLead,
                     company: analysis.clientName !== 'Unknown' ? analysis.clientName : emailLead.company,
-                    // Use AI inferred project name as a display friendly name if available, otherwise keep sender name
-                    // Actually, keep Lead Name as person, Company as Client.
-                    notes: enhancedNote, // Store rich analysis in notes
+                    notes: enhancedNote, 
                     phone: analysis.contactInfo?.phone || emailLead.phone,
-                    // Add a custom flag or structure if we modified type, but for now we pack into notes/company
                 });
             }
 
             // Merge and Dedupe
             const finalLeads = [...enhancedLeads];
-            // Add any existing leads that weren't in the fetch (older ones)
             leads.forEach(old => {
                 if (!finalLeads.find(f => f.id === old.id)) {
                     finalLeads.push(old);
                 }
             });
             
-            // Sort by date descending
             finalLeads.sort((a,b) => new Date(b.dateAdded).getTime() - new Date(a.dateAdded).getTime());
 
             setLeads(finalLeads);
@@ -115,11 +115,7 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
             contractValue: 0
         };
         setProjects([...projects, newProject]);
-        
-        // Remove from leads after conversion
         setLeads(leads.filter(l => l.id !== lead.id));
-        
-        // Switch to pipeline view to show success
         setActiveTab('pipeline');
     };
 
@@ -128,6 +124,41 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
             setLeads(leads.filter(l => l.id !== id));
             if (selectedLead?.id === id) setSelectedLead(null);
         }
+    };
+
+    const handleSendEmail = async () => {
+        if (!emailCompose) return;
+        setIsSendingEmail(true);
+        try {
+            await sendOutlookEmail(emailCompose.to, emailCompose.subject, emailCompose.body);
+            alert(`Email sent to ${emailCompose.to}`);
+            setEmailCompose(null);
+        } catch (e: any) {
+            alert(`Failed to send: ${e.message}`);
+        } finally {
+            setIsSendingEmail(false);
+        }
+    };
+
+    const handleAddManualLead = () => {
+        if (!newLead.name || !newLead.email) {
+            alert("Name and Email are required");
+            return;
+        }
+        const lead: Lead = {
+            id: `manual-${Date.now()}`,
+            name: newLead.name,
+            email: newLead.email,
+            company: newLead.company || 'Unknown',
+            phone: newLead.phone || '',
+            source: 'Manual',
+            status: 'New',
+            notes: newLead.notes || 'Manually added lead.',
+            dateAdded: new Date().toISOString()
+        };
+        setLeads([lead, ...leads]);
+        setShowAddLead(false);
+        setNewLead({ name: '', email: '', company: '', phone: '', source: 'Manual', notes: '' });
     };
 
     // --- DRAG AND DROP HANDLERS ---
@@ -201,7 +232,6 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
                                 </span>
                             </div>
                             
-                            {/* Keep Quick Actions as fallback */}
                             {setProjects && (
                                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
                                     {status === 'Draft' && (
@@ -243,7 +273,77 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
     };
 
     return (
-        <div className="p-4 md:p-8 max-w-7xl mx-auto h-full flex flex-col space-y-6">
+        <div className="p-4 md:p-8 max-w-7xl mx-auto h-full flex flex-col space-y-6 relative">
+            
+            {/* EMAIL COMPOSE MODAL */}
+            {emailCompose && (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
+                        <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                            <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                                <Mail className="w-4 h-4 text-blue-600" /> Compose Email
+                            </h3>
+                            <button onClick={() => setEmailCompose(null)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5"/></button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">To</label>
+                                <div className="text-sm font-medium text-slate-900 border-b border-slate-100 py-1">{emailCompose.name} &lt;{emailCompose.to}&gt;</div>
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">Subject</label>
+                                <input 
+                                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1 focus:ring-2 focus:ring-blue-500 outline-none"
+                                    value={emailCompose.subject}
+                                    onChange={(e) => setEmailCompose({...emailCompose, subject: e.target.value})}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">Message</label>
+                                <textarea 
+                                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1 focus:ring-2 focus:ring-blue-500 outline-none min-h-[150px]"
+                                    value={emailCompose.body}
+                                    onChange={(e) => setEmailCompose({...emailCompose, body: e.target.value})}
+                                />
+                            </div>
+                        </div>
+                        <div className="p-4 border-t border-slate-100 flex justify-end gap-2 bg-slate-50">
+                            <button onClick={() => setEmailCompose(null)} className="px-4 py-2 text-slate-600 text-sm font-bold hover:bg-slate-100 rounded-lg">Cancel</button>
+                            <button 
+                                onClick={handleSendEmail}
+                                disabled={isSendingEmail}
+                                className="px-6 py-2 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 flex items-center gap-2 disabled:opacity-70"
+                            >
+                                {isSendingEmail ? <Loader2 className="w-4 h-4 animate-spin"/> : <Send className="w-4 h-4"/>} Send Email
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ADD MANUAL LEAD MODAL */}
+            {showAddLead && (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+                        <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                            <h3 className="font-bold text-slate-800">Add New Lead</h3>
+                            <button onClick={() => setShowAddLead(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5"/></button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <input placeholder="Lead Name" className="w-full border rounded-lg p-2 text-sm" value={newLead.name} onChange={e => setNewLead({...newLead, name: e.target.value})} />
+                            <input placeholder="Email" className="w-full border rounded-lg p-2 text-sm" value={newLead.email} onChange={e => setNewLead({...newLead, email: e.target.value})} />
+                            <input placeholder="Company" className="w-full border rounded-lg p-2 text-sm" value={newLead.company} onChange={e => setNewLead({...newLead, company: e.target.value})} />
+                            <input placeholder="Phone" className="w-full border rounded-lg p-2 text-sm" value={newLead.phone} onChange={e => setNewLead({...newLead, phone: e.target.value})} />
+                            <textarea placeholder="Notes" className="w-full border rounded-lg p-2 text-sm" value={newLead.notes} onChange={e => setNewLead({...newLead, notes: e.target.value})} />
+                        </div>
+                        <div className="p-4 border-t border-slate-100 flex justify-end gap-2 bg-slate-50">
+                            <button onClick={() => setShowAddLead(false)} className="px-4 py-2 text-slate-600 text-sm font-bold">Cancel</button>
+                            <button onClick={handleAddManualLead} className="px-6 py-2 bg-slate-900 text-white text-sm font-bold rounded-lg hover:bg-slate-800">Add Lead</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 shrink-0">
                 <div>
                     <h1 className="text-3xl font-bold text-slate-900 tracking-tight">CRM & Pipeline</h1>
@@ -290,8 +390,14 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
                                 className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                             />
                         </div>
-                        <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
                             {analysisProgress && <span className="text-xs text-blue-600 font-medium animate-pulse">{analysisProgress}</span>}
+                            <button 
+                                onClick={() => setShowAddLead(true)}
+                                className="bg-white border border-slate-300 text-slate-700 px-3 py-2 rounded-lg text-sm font-bold hover:bg-slate-50 flex items-center gap-2"
+                            >
+                                <Plus className="w-4 h-4" /> Add Lead
+                            </button>
                             <button 
                                 onClick={handleFetchLeads}
                                 disabled={isLoading}
@@ -347,6 +453,13 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
                                                 <td className="px-6 py-4 text-right">
                                                     <div className="flex justify-end gap-2">
                                                         <button 
+                                                            onClick={() => setEmailCompose({to: lead.email, name: lead.name, subject: `Re: Project Inquiry`, body: `Hi ${lead.name},\n\n`})}
+                                                            className="p-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition"
+                                                            title="Send Email"
+                                                        >
+                                                            <Mail className="w-4 h-4" />
+                                                        </button>
+                                                        <button 
                                                             onClick={() => setSelectedLead(lead)}
                                                             className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition"
                                                             title="View Details"
@@ -375,7 +488,7 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
                                 {leads.length === 0 && (
                                     <tr>
                                         <td colSpan={4} className="py-12 text-center text-slate-400">
-                                            No leads found. Click "Sync Outlook" to fetch emails.
+                                            No leads found. Click "Sync Outlook" to fetch emails or "Add Lead" to create manually.
                                         </td>
                                     </tr>
                                 )}
@@ -422,6 +535,16 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
                                             </div>
                                         </div>
                                     </div>
+
+                                    {/* Actions in Detail View */}
+                                    <button 
+                                        onClick={() => {
+                                            setEmailCompose({to: selectedLead.email, name: selectedLead.name, subject: 'Re: Project', body: `Hi ${selectedLead.name},\n\n`});
+                                        }}
+                                        className="w-full py-2 bg-indigo-50 text-indigo-700 font-bold rounded-lg hover:bg-indigo-100 flex items-center justify-center gap-2"
+                                    >
+                                        <Mail className="w-4 h-4" /> Reply via Email
+                                    </button>
 
                                     {/* AI Analysis Section */}
                                     <div className="bg-white border border-indigo-100 rounded-xl overflow-hidden shadow-sm">
