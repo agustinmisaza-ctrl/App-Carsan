@@ -1,7 +1,8 @@
+
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { PurchaseRecord, MaterialItem, ProjectEstimate, ServiceTicket, SupplierStatus, ShoppingItem } from '../types';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell, ReferenceLine, Scatter, ScatterChart, AreaChart, Area } from 'recharts';
-import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, PieChart, Sparkles, ListFilter, Flame, AlertTriangle, Trash2, Plus, Save, Briefcase, Wallet, RefreshCw, Calendar, Info, Download, ShoppingCart, Ban, ShieldAlert, ArrowRight, Settings } from 'lucide-react';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area, Cell } from 'recharts';
+import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, Sparkles, AlertTriangle, Trash2, Plus, ShoppingCart, RefreshCw, Calendar, Download, Settings, FileText } from 'lucide-react';
 import { extractInvoiceData } from '../services/geminiService';
 import * as XLSX from 'xlsx';
 import { parseCurrency, normalizeSupplier, robustParseDate } from '../utils/purchaseData';
@@ -18,10 +19,9 @@ interface PriceAnalysisProps {
 }
 
 export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], setPurchases, materials = [], setMaterials, projects = [], tickets = [] }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'job-costing' | 'analysis' | 'procurement' | 'entry'>('overview');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'analysis' | 'procurement' | 'entry'>('dashboard');
   const [selectedItem, setSelectedItem] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedProject, setSelectedProject] = useState<string>('All');
   const [sortByValue, setSortByValue] = useState(true);
   const [includeBenchmarks, setIncludeBenchmarks] = useState(false);
   
@@ -38,6 +38,8 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
   const [scannedRecords, setScannedRecords] = useState<PurchaseRecord[]>([]); 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bulkInputRef = useRef<HTMLInputElement>(null);
+  const shoppingListInputRef = useRef<HTMLInputElement>(null);
+
   const [manualEntry, setManualEntry] = useState<Partial<PurchaseRecord>>({
       date: new Date().toISOString().split('T')[0],
       supplier: '',
@@ -70,7 +72,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
           return d >= start && d <= end;
       });
       if (!inRange && purchases.length > 0 && dateRange.start.includes(String(currentYear))) {
-          // Switch to all time automatically if current year is empty
           setDateRange({ start: '2020-01-01', end: `${currentYear + 1}-12-31` });
       }
   }, [purchases.length]);
@@ -79,7 +80,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
   useEffect(() => {
       const uniqueSuppliers = Array.from(new Set(purchases.map(p => normalizeSupplier(p.supplier))));
       setSupplierStatuses(prev => {
-          // Keep existing status if set, otherwise default to unblocked
           return uniqueSuppliers.map(name => {
               const existing = prev.find(s => s.name === name);
               return existing || { name, isBlocked: false };
@@ -97,88 +97,45 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
           return d >= start && d <= end;
       });
 
-      const filteredProjects = projects.filter(p => {
-          const dateStr = p.awardedDate || p.dateCreated;
-          const d = robustParseDate(dateStr).getTime();
-          return d >= start && d <= end;
+      return { purchases: filteredPurchases };
+  }, [purchases, dateRange]);
+
+  // --- PROCUREMENT METRICS ---
+  const procurementMetrics = useMemo(() => {
+      const data = filteredData.purchases;
+      const totalSpend = data.reduce((acc, p) => acc + (p.totalCost || 0), 0);
+      const uniqueSuppliers = new Set(data.map(p => normalizeSupplier(p.supplier))).size;
+      const totalPOs = new Set(data.map(p => p.poNumber)).size; // Approximate count of orders
+      const avgOrderValue = totalPOs > 0 ? totalSpend / totalPOs : 0;
+
+      // Spend by Supplier
+      const supplierSpendMap: Record<string, number> = {};
+      data.forEach(p => {
+          const s = normalizeSupplier(p.supplier);
+          supplierSpendMap[s] = (supplierSpendMap[s] || 0) + p.totalCost;
       });
+      const topSuppliers = Object.entries(supplierSpendMap)
+          .map(([name, value]) => ({ name, value }))
+          .sort((a,b) => b.value - a.value)
+          .slice(0, 10);
 
-      const filteredTickets = tickets.filter(t => {
-          const d = robustParseDate(t.dateCreated).getTime();
-          return d >= start && d <= end;
+      // Spend by Month
+      const monthlySpendMap: Record<string, number> = {};
+      data.forEach(p => {
+          const date = robustParseDate(p.date);
+          const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`; // YYYY-MM
+          monthlySpendMap[key] = (monthlySpendMap[key] || 0) + p.totalCost;
       });
+      const monthlyTrend = Object.entries(monthlySpendMap)
+          .map(([date, value]) => ({ date, value }))
+          .sort((a,b) => a.date.localeCompare(b.date));
 
-      return { purchases: filteredPurchases, projects: filteredProjects, tickets: filteredTickets };
-  }, [purchases, projects, tickets, dateRange]);
-
-  // --- FINANCIAL CALCULATIONS ---
-  const financialData = useMemo(() => {
-      const { projects: pList, tickets: tList, purchases: purList } = filteredData;
-
-      const projectRevenue = pList
-          .filter(p => ['Won', 'Ongoing', 'Completed'].includes(p.status))
-          .reduce((sum, p) => sum + (p.contractValue || 0), 0);
-
-      const serviceRevenue = tList
-          .filter(t => ['Authorized', 'Completed'].includes(t.status))
-          .reduce((sum, t) => {
-              const mat = (t.items || []).reduce((s, i) => s + (i.quantity * i.unitMaterialCost), 0);
-              const lab = (t.items || []).reduce((s, i) => s + (i.quantity * i.unitLaborHours * t.laborRate), 0);
-              return sum + mat + lab;
-          }, 0);
-
-      const totalRevenue = projectRevenue + serviceRevenue;
-      const materialExpense = purList.reduce((sum, p) => sum + p.totalCost, 0);
-      const laborCostBasis = 0.4; 
-      
-      const projectLaborRev = pList
-        .filter(p => ['Won', 'Ongoing', 'Completed'].includes(p.status))
-        .reduce((sum, p) => sum + (p.items || []).reduce((s, i) => s + (i.quantity * i.unitLaborHours * p.laborRate), 0), 0);
-      
-      const ticketLaborRev = tList
-        .filter(t => ['Authorized', 'Completed'].includes(t.status))
-        .reduce((sum, t) => sum + (t.items || []).reduce((s, i) => s + (i.quantity * i.unitLaborHours * t.laborRate), 0), 0);
-
-      const totalLaborExpense = (projectLaborRev + ticketLaborRev) * laborCostBasis;
-      const totalExpenses = materialExpense + totalLaborExpense;
-
-      const netProfit = totalRevenue - totalExpenses;
-      const margin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
-
-      return { totalRevenue, totalExpenses, netProfit, margin, projectRevenue, serviceRevenue, materialExpense, totalLaborExpense };
+      return { totalSpend, uniqueSuppliers, totalPOs, avgOrderValue, topSuppliers, monthlyTrend };
   }, [filteredData]);
 
-  // --- JOB COSTING DATA ---
-  const jobCostingData = useMemo(() => {
-      const activeProjects = projects.filter(p => ['Won', 'Ongoing', 'Completed'].includes(p.status));
-      
-      return activeProjects.map(p => {
-          const estMat = (p.items || []).reduce((sum, i) => sum + ((i.quantity || 0) * (i.unitMaterialCost || 0)), 0);
-          const estLab = (p.items || []).reduce((sum, i) => sum + ((i.quantity || 0) * (i.unitLaborHours || 0) * (p.laborRate || 0)), 0);
-          
-          const actMat = purchases
-              .filter(pur => pur.projectName && pur.projectName.trim().toLowerCase() === p.name.trim().toLowerCase())
-              .reduce((sum, pur) => sum + (pur.totalCost || 0), 0);
-          
-          const actLab = 0; 
-          const contract = p.contractValue || (estMat + estLab) * 1.3; 
-          
-          return {
-              id: p.id,
-              name: p.name,
-              status: p.status,
-              contract,
-              estMat,
-              actMat,
-              estLab,
-              actLab
-          };
-      }).sort((a, b) => b.contract - a.contract);
-  }, [projects, purchases]);
-
-  // --- PURCHASING ANALYSIS LOGIC ---
+  // --- MARKET TRENDS LOGIC ---
   const processedItemsList = useMemo(() => {
-      const itemMap = new Map<string, { total: number, count: number, isBenchmark?: boolean }>();
+      const itemMap = new Map<string, { total: number, count: number }>();
       
       filteredData.purchases.forEach(p => {
           const name = p.itemDescription || 'Unknown';
@@ -188,19 +145,10 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
           curr.count += 1;
       });
 
-      if (includeBenchmarks) {
-          MIAMI_STANDARD_PRICES.forEach(standard => {
-              if (!itemMap.has(standard.name)) {
-                  itemMap.set(standard.name, { total: standard.materialCost, count: 1, isBenchmark: true });
-              }
-          });
-      }
-
       let items = Array.from(itemMap.entries()).map(([name, data]) => ({
           name,
           total: data.total,
           count: data.count,
-          isBenchmark: data.isBenchmark
       }));
 
       if (searchTerm) {
@@ -214,63 +162,20 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
       }
 
       return items;
-  }, [filteredData.purchases, searchTerm, sortByValue, includeBenchmarks]);
+  }, [filteredData.purchases, searchTerm, sortByValue]);
 
-  // --- MULTI-SUPPLIER FLUCTUATION DATA ---
-  const multiSupplierChartData = useMemo(() => {
+  // Simple Line Chart Data for "Older Version" feel
+  const simpleTrendData = useMemo(() => {
       if (!selectedItem) return [];
+      const relevant = purchases.filter(p => p.itemDescription === selectedItem);
+      relevant.sort((a,b) => robustParseDate(a.date).getTime() - robustParseDate(b.date).getTime());
       
-      const relevantPurchases = purchases.filter(p => p.itemDescription === selectedItem);
-      // Sort by date asc
-      relevantPurchases.sort((a,b) => robustParseDate(a.date).getTime() - robustParseDate(b.date).getTime());
-
-      // We need a structure like: [{date: '2023-01', 'World Electric': 10, 'Graybar': 12}, ...]
-      // But recharts handles varying keys if we structure data correctly or iterate lines.
-      // Easiest is to create a list of data points, each point has date and specific supplier price.
-      
-      return relevantPurchases.map(p => ({
+      return relevant.map(p => ({
           date: robustParseDate(p.date).toLocaleDateString(),
-          timestamp: robustParseDate(p.date).getTime(),
-          [normalizeSupplier(p.supplier)]: p.unitCost,
-          supplierName: normalizeSupplier(p.supplier),
-          price: p.unitCost
+          price: p.unitCost,
+          supplier: normalizeSupplier(p.supplier)
       }));
   }, [selectedItem, purchases]);
-
-  const supplierColors = ['#2563eb', '#16a34a', '#db2777', '#ca8a04', '#9333ea', '#0891b2'];
-
-  const selectedItemSupplierStats = useMemo(() => {
-        if (!selectedItem) return [];
-        const relevant = purchases.filter(p => p.itemDescription === selectedItem);
-        const groups: Record<string, { total: number, count: number, min: number, max: number, lastDate: number, lastPrice: number }> = {};
-        
-        relevant.forEach(r => {
-            const sup = normalizeSupplier(r.supplier);
-            const date = robustParseDate(r.date).getTime();
-            
-            if (!groups[sup]) groups[sup] = { total: 0, count: 0, min: r.unitCost, max: r.unitCost, lastDate: date, lastPrice: r.unitCost };
-            
-            groups[sup].total += r.unitCost;
-            groups[sup].count += 1;
-            groups[sup].min = Math.min(groups[sup].min, r.unitCost);
-            groups[sup].max = Math.max(groups[sup].max, r.unitCost);
-            
-            if (date > groups[sup].lastDate) {
-                groups[sup].lastDate = date;
-                groups[sup].lastPrice = r.unitCost;
-            }
-        });
-
-        return Object.entries(groups).map(([name, stats]) => ({
-            name,
-            avgPrice: stats.total / stats.count,
-            minPrice: stats.min,
-            maxPrice: stats.max,
-            lastPrice: stats.lastPrice,
-            lastDate: new Date(stats.lastDate).toLocaleDateString(),
-            count: stats.count
-        })).sort((a,b) => a.lastPrice - b.lastPrice); // Cheapest Last Price first
-  }, [purchases, selectedItem]);
 
   // --- SMART PROCUREMENT LOGIC ---
   const optimizedProcurement = useMemo(() => {
@@ -322,6 +227,49 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
       setShoppingList([...shoppingList, { id: Date.now().toString(), name: newItemName, quantity: newItemQty }]);
       setNewItemName('');
       setNewItemQty(1);
+  };
+
+  const handleUploadShoppingList = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+          try {
+              const data = event.target?.result;
+              const workbook = XLSX.read(data, { type: 'array' });
+              const sheetName = workbook.SheetNames[0];
+              const worksheet = workbook.Sheets[sheetName];
+              const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+              // Expected format: Column 'Item' and 'Quantity'
+              const newItems: ShoppingItem[] = [];
+              jsonData.forEach((row: any) => {
+                  const name = row['Item'] || row['Name'] || row['Description'] || row['Material'];
+                  const qty = row['Quantity'] || row['Qty'] || row['Count'] || 1;
+                  
+                  if (name) {
+                      newItems.push({
+                          id: Math.random().toString(36).substr(2, 9),
+                          name: String(name),
+                          quantity: Number(qty) || 1
+                      });
+                  }
+              });
+
+              if (newItems.length > 0) {
+                  setShoppingList(prev => [...prev, ...newItems]);
+                  showNotification('success', `Added ${newItems.length} items to Shopping List`);
+              } else {
+                  showNotification('error', "No valid items found. Ensure columns 'Item' and 'Quantity' exist.");
+              }
+          } catch (err) {
+              console.error(err);
+              showNotification('error', "Failed to parse file.");
+          }
+      };
+      reader.readAsArrayBuffer(file);
+      e.target.value = ''; // Reset input
   };
 
   const showNotification = (type: 'success' | 'error', message: string) => {
@@ -421,15 +369,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
       });
   };
 
-  const cashFlowData = [
-      { name: 'Jan', revenue: financialData.totalRevenue * 0.1, expenses: financialData.totalExpenses * 0.12 },
-      { name: 'Feb', revenue: financialData.totalRevenue * 0.12, expenses: financialData.totalExpenses * 0.11 },
-      { name: 'Mar', revenue: financialData.totalRevenue * 0.15, expenses: financialData.totalExpenses * 0.14 },
-      { name: 'Apr', revenue: financialData.totalRevenue * 0.18, expenses: financialData.totalExpenses * 0.16 },
-      { name: 'May', revenue: financialData.totalRevenue * 0.20, expenses: financialData.totalExpenses * 0.19 },
-      { name: 'Jun', revenue: financialData.totalRevenue * 0.25, expenses: financialData.totalExpenses * 0.22 },
-  ];
-
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
       {notification && (
@@ -469,12 +408,11 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Financial Suite</h1>
-          <p className="text-slate-500 mt-1">Enterprise Profitability & Job Costing</p>
+          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Procurement Hub</h1>
+          <p className="text-slate-500 mt-1">Track material spend, analyze trends, and optimize purchasing.</p>
         </div>
         <div className="bg-slate-100 p-1 rounded-lg flex overflow-x-auto max-w-full">
-            <button onClick={() => setActiveTab('overview')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'overview' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><LayoutDashboard className="w-4 h-4" /> Overview</button>
-            <button onClick={() => setActiveTab('job-costing')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'job-costing' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><Briefcase className="w-4 h-4" /> Job Costing</button>
+            <button onClick={() => setActiveTab('dashboard')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'dashboard' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><LayoutDashboard className="w-4 h-4" /> Dashboard</button>
             <button onClick={() => setActiveTab('analysis')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'analysis' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><TrendingUp className="w-4 h-4" /> Market Trends</button>
             <button onClick={() => setActiveTab('procurement')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'procurement' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><ShoppingCart className="w-4 h-4" /> Smart Buy</button>
             <button onClick={() => setActiveTab('entry')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'entry' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><Database className="w-4 h-4" /> Data Entry</button>
@@ -498,133 +436,106 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
           />
       </div>
 
-      {activeTab === 'overview' && (
+      {activeTab === 'dashboard' && (
           <div className="space-y-6">
+              {/* Procurement KPIs */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                      <p className="text-xs font-bold text-slate-400 uppercase mb-1">Total Revenue</p>
-                      <p className="text-2xl font-bold text-slate-900">${financialData.totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
-                      <div className="flex gap-2 mt-2">
-                          <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded font-bold">Proj: ${(financialData.projectRevenue/1000).toFixed(1)}k</span>
-                          <span className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded font-bold">Svc: ${(financialData.serviceRevenue/1000).toFixed(1)}k</span>
-                      </div>
+                      <p className="text-xs font-bold text-slate-400 uppercase mb-1">Total Spend</p>
+                      <p className="text-2xl font-bold text-slate-900">${procurementMetrics.totalSpend.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
                   </div>
                   <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                      <p className="text-xs font-bold text-slate-400 uppercase mb-1">Total Expenses</p>
-                      <p className="text-2xl font-bold text-slate-900">${financialData.totalExpenses.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
-                      <div className="flex gap-2 mt-2">
-                          <span className="text-[10px] bg-orange-50 text-orange-600 px-2 py-0.5 rounded font-bold">Mat: ${(financialData.materialExpense/1000).toFixed(1)}k</span>
-                          <span className="text-[10px] bg-red-50 text-red-600 px-2 py-0.5 rounded font-bold">Lab: ${(financialData.totalLaborExpense/1000).toFixed(1)}k</span>
-                      </div>
+                      <p className="text-xs font-bold text-slate-400 uppercase mb-1">Purchase Orders</p>
+                      <p className="text-2xl font-bold text-slate-900">{procurementMetrics.totalPOs}</p>
                   </div>
                   <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                      <p className="text-xs font-bold text-slate-400 uppercase mb-1">Net Profit</p>
-                      <p className={`text-2xl font-bold ${financialData.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                          ${financialData.netProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                      </p>
-                      <p className="text-[10px] text-slate-400 mt-2">After material & labor</p>
+                      <p className="text-xs font-bold text-slate-400 uppercase mb-1">Avg Order Value</p>
+                      <p className="text-2xl font-bold text-slate-900">${procurementMetrics.avgOrderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
                   </div>
                   <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                      <p className="text-xs font-bold text-slate-400 uppercase mb-1">Profit Margin</p>
-                      <p className={`text-2xl font-bold ${financialData.margin >= 20 ? 'text-emerald-600' : 'text-orange-600'}`}>
-                          {financialData.margin.toFixed(1)}%
-                      </p>
-                      <p className="text-[10px] text-slate-400 mt-2">Target: 25%+</p>
+                      <p className="text-xs font-bold text-slate-400 uppercase mb-1">Active Suppliers</p>
+                      <p className="text-2xl font-bold text-slate-900">{procurementMetrics.uniqueSuppliers}</p>
                   </div>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-80">
-                      <h3 className="font-bold text-slate-800 mb-6">Cash Flow Forecast (Est)</h3>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Monthly Spend Trend */}
+                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-80">
+                      <h3 className="font-bold text-slate-800 mb-6">Monthly Spend Trend</h3>
                       <ResponsiveContainer width="100%" height="85%">
-                          <AreaChart data={cashFlowData}>
+                          <AreaChart data={procurementMetrics.monthlyTrend}>
                               <defs>
-                                  <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
+                                  <linearGradient id="colorSpend" x1="0" y1="0" x2="0" y2="1">
                                       <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
                                       <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
                                   </linearGradient>
-                                  <linearGradient id="colorExp" x1="0" y1="0" x2="0" y2="1">
-                                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8}/>
-                                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
-                                  </linearGradient>
                               </defs>
                               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} />
+                              <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} />
                               <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} tickFormatter={(val) => `$${val/1000}k`} />
-                              <Tooltip />
-                              <Area type="monotone" dataKey="revenue" stroke="#3b82f6" fillOpacity={1} fill="url(#colorRev)" />
-                              <Area type="monotone" dataKey="expenses" stroke="#ef4444" fillOpacity={1} fill="url(#colorExp)" />
+                              <Tooltip formatter={(value: number) => `$${value.toLocaleString()}`} />
+                              <Area type="monotone" dataKey="value" stroke="#3b82f6" fillOpacity={1} fill="url(#colorSpend)" name="Spend" />
                           </AreaChart>
                       </ResponsiveContainer>
                   </div>
-                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-80 flex flex-col justify-center items-center text-center">
-                      <div className="w-32 h-32 rounded-full border-8 border-emerald-100 border-t-emerald-500 flex items-center justify-center">
-                          <div>
-                              <p className="text-2xl font-bold text-emerald-600">{financialData.margin.toFixed(0)}%</p>
-                              <p className="text-[10px] text-slate-400 uppercase font-bold">Margin</p>
-                          </div>
-                      </div>
-                      <h4 className="mt-6 font-bold text-slate-800">Financial Health</h4>
-                      <p className="text-sm text-slate-500 mt-2 px-4">
-                          {financialData.margin > 20 ? "Excellent performance. Keep controlling material costs." : "Margins are tight. Review procurement strategy."}
-                      </p>
+
+                  {/* Spend by Supplier */}
+                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-80">
+                      <h3 className="font-bold text-slate-800 mb-6">Top Suppliers by Spend</h3>
+                      <ResponsiveContainer width="100%" height="85%">
+                          <BarChart data={procurementMetrics.topSuppliers} layout="vertical" margin={{ left: 20 }}>
+                              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                              <XAxis type="number" hide />
+                              <YAxis dataKey="name" type="category" width={100} tick={{fontSize: 11, fill: '#64748b'}} />
+                              <Tooltip formatter={(value: number) => `$${value.toLocaleString()}`} />
+                              <Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={20} />
+                          </BarChart>
+                      </ResponsiveContainer>
                   </div>
               </div>
-          </div>
-      )}
 
-      {activeTab === 'job-costing' && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="overflow-x-auto">
-                  <table className="w-full text-sm text-left">
-                      <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-xs">
-                          <tr>
-                              <th className="px-6 py-4">Project</th>
-                              <th className="px-6 py-4 text-center">Status</th>
-                              <th className="px-6 py-4 text-right">Contract</th>
-                              <th className="px-6 py-4 text-right">Est. Mat</th>
-                              <th className="px-6 py-4 text-right">Act. Mat</th>
-                              <th className="px-6 py-4 text-center">Variance</th>
-                          </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                          {jobCostingData.map(job => {
-                              const variance = job.estMat - job.actMat;
-                              const isOver = variance < 0;
-                              return (
-                                  <tr key={job.id} className="hover:bg-slate-50">
-                                      <td className="px-6 py-4 font-bold text-slate-900">{job.name}</td>
-                                      <td className="px-6 py-4 text-center">
-                                          <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase border ${job.status === 'Ongoing' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
-                                              {job.status}
-                                          </span>
-                                      </td>
-                                      <td className="px-6 py-4 text-right font-medium">${job.contract.toLocaleString()}</td>
-                                      <td className="px-6 py-4 text-right text-slate-600">${job.estMat.toLocaleString()}</td>
-                                      <td className="px-6 py-4 text-right text-slate-600">${job.actMat.toLocaleString()}</td>
-                                      <td className="px-6 py-4 text-center">
-                                          <span className={`px-2 py-1 rounded font-bold text-xs ${isOver ? 'text-red-600 bg-red-50' : 'text-emerald-600 bg-emerald-50'}`}>
-                                              {variance > 0 ? '+' : ''}{variance.toLocaleString()}
-                                          </span>
-                                      </td>
+              {/* Recent Transactions List */}
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                  <div className="p-4 border-b border-slate-200 bg-slate-50">
+                      <h3 className="font-bold text-slate-800">Recent Transactions</h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                      <table className="w-full text-sm text-left">
+                          <thead className="bg-white text-slate-500 font-bold uppercase text-xs border-b border-slate-100">
+                              <tr>
+                                  <th className="px-6 py-3">Date</th>
+                                  <th className="px-6 py-3">Supplier</th>
+                                  <th className="px-6 py-3">Item</th>
+                                  <th className="px-6 py-3 text-right">Qty</th>
+                                  <th className="px-6 py-3 text-right">Cost</th>
+                              </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                              {filteredData.purchases.slice(0, 10).map((purchase) => (
+                                  <tr key={purchase.id} className="hover:bg-slate-50">
+                                      <td className="px-6 py-3 text-slate-600">{new Date(purchase.date).toLocaleDateString()}</td>
+                                      <td className="px-6 py-3 font-medium text-slate-900">{purchase.supplier}</td>
+                                      <td className="px-6 py-3 text-slate-600 truncate max-w-xs">{purchase.itemDescription}</td>
+                                      <td className="px-6 py-3 text-right text-slate-600">{purchase.quantity}</td>
+                                      <td className="px-6 py-3 text-right font-bold text-slate-800">${purchase.totalCost.toFixed(2)}</td>
                                   </tr>
-                              );
-                          })}
-                          {jobCostingData.length === 0 && <tr><td colSpan={6} className="text-center py-12 text-slate-400">No active projects found.</td></tr>}
-                      </tbody>
-                  </table>
+                              ))}
+                          </tbody>
+                      </table>
+                  </div>
               </div>
           </div>
       )}
 
       {activeTab === 'analysis' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[600px]">
+              {/* Item List */}
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
                   <div className="p-4 border-b border-slate-200">
                       <div className="relative">
                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                           <input 
-                              placeholder="Search item..." 
+                              placeholder="Search item history..." 
                               className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm outline-none"
                               value={searchTerm}
                               onChange={(e) => setSearchTerm(e.target.value)}
@@ -650,50 +561,47 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                   </div>
               </div>
 
+              {/* Chart Area */}
               <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col">
                   {selectedItem ? (
                       <>
                           <div className="flex justify-between items-start mb-6">
                               <div>
                                   <h3 className="font-bold text-xl text-slate-900">{selectedItem}</h3>
-                                  <p className="text-sm text-slate-500">Price History across Suppliers</p>
+                                  <p className="text-sm text-slate-500">Price Trend (Unit Cost)</p>
                               </div>
                           </div>
                           
                           <div className="flex-1 min-h-[300px]">
                               <ResponsiveContainer width="100%" height="100%">
-                                  <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
-                                      <CartesianGrid strokeDasharray="3 3" />
-                                      <XAxis dataKey="timestamp" domain={['auto', 'auto']} name="Date" tickFormatter={(time) => new Date(time).toLocaleDateString()} type="number" />
-                                      <YAxis dataKey="price" name="Price" unit="$" />
-                                      <Tooltip cursor={{ strokeDasharray: '3 3' }} labelFormatter={(l) => new Date(l).toLocaleDateString()} />
-                                      <Legend />
-                                      {Array.from(new Set(multiSupplierChartData.map(d => d.supplierName))).map((sup, i) => (
-                                          <Scatter 
-                                              key={sup} 
-                                              name={sup} 
-                                              data={multiSupplierChartData.filter(d => d.supplierName === sup)} 
-                                              fill={supplierColors[i % supplierColors.length]} 
-                                          />
-                                      ))}
-                                  </ScatterChart>
+                                  <LineChart data={simpleTrendData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                      <XAxis dataKey="date" tick={{fontSize: 12, fill: '#64748b'}} />
+                                      <YAxis domain={['auto', 'auto']} tick={{fontSize: 12, fill: '#64748b'}} tickFormatter={(v) => `$${v}`} />
+                                      <Tooltip 
+                                          contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
+                                          formatter={(val: number) => [`$${val.toFixed(2)}`, 'Unit Cost']}
+                                      />
+                                      <Line type="monotone" dataKey="price" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6 }} />
+                                  </LineChart>
                               </ResponsiveContainer>
                           </div>
 
-                          <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
-                              {selectedItemSupplierStats.map((stat, i) => (
-                                  <div key={stat.name} className={`p-3 rounded-lg border ${i === 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
-                                      <p className="text-xs font-bold text-slate-500 uppercase truncate">{stat.name}</p>
-                                      <p className="text-lg font-bold text-slate-900 mt-1">${stat.lastPrice.toFixed(2)}</p>
-                                      <p className="text-[10px] text-slate-400">Avg: ${stat.avgPrice.toFixed(2)}</p>
-                                  </div>
-                              ))}
+                          <div className="mt-6 bg-slate-50 p-4 rounded-lg border border-slate-100">
+                              <h4 className="font-bold text-sm text-slate-800 mb-2">Purchase History</h4>
+                              <div className="flex flex-wrap gap-2">
+                                  {simpleTrendData.slice(-5).reverse().map((pt, i) => (
+                                      <div key={i} className="bg-white px-3 py-1.5 rounded border border-slate-200 text-xs">
+                                          <span className="text-slate-500">{pt.date}:</span> <span className="font-bold text-slate-800">${pt.price.toFixed(2)}</span> <span className="text-slate-400">({pt.supplier})</span>
+                                      </div>
+                                  ))}
+                              </div>
                           </div>
                       </>
                   ) : (
                       <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
                           <TrendingUp className="w-16 h-16 mb-4 opacity-20" />
-                          <p>Select an item to analyze pricing trends.</p>
+                          <p>Select an item to view price trends.</p>
                       </div>
                   )}
               </div>
@@ -702,12 +610,32 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
 
       {activeTab === 'procurement' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+              {/* Shopping List Section */}
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col h-full">
                   <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><ShoppingCart className="w-5 h-5"/> Shopping List</h3>
+                  
+                  {/* File Upload Button */}
+                  <div className="mb-4">
+                      <button 
+                          onClick={() => shoppingListInputRef.current?.click()}
+                          className="w-full border-2 border-dashed border-blue-200 bg-blue-50 text-blue-700 py-3 rounded-xl font-bold text-sm hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"
+                      >
+                          <FileSpreadsheet className="w-4 h-4" /> Upload Excel List
+                      </button>
+                      <input 
+                          type="file" 
+                          ref={shoppingListInputRef}
+                          className="hidden"
+                          accept=".xlsx,.xls,.csv"
+                          onChange={handleUploadShoppingList}
+                      />
+                      <p className="text-[10px] text-center text-slate-400 mt-1">Columns needed: Item, Quantity</p>
+                  </div>
+
                   <div className="flex gap-2 mb-4">
                       <input 
                           className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none"
-                          placeholder="Item name..."
+                          placeholder="Or add manually..."
                           value={newItemName}
                           onChange={(e) => setNewItemName(e.target.value)}
                       />
@@ -717,36 +645,27 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                           value={newItemQty}
                           onChange={(e) => setNewItemQty(Number(e.target.value))}
                       />
-                      <button onClick={handleAddItemToShoppingList} className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700">
+                      <button onClick={handleAddItemToShoppingList} className="bg-slate-900 text-white p-2 rounded-lg hover:bg-slate-800">
                           <Plus className="w-5 h-5" />
                       </button>
                   </div>
-                  <div className="space-y-2 max-h-[400px] overflow-y-auto">
+
+                  <div className="space-y-2 flex-1 overflow-y-auto max-h-[400px] border-t border-slate-100 pt-2">
                       {shoppingList.map(item => (
-                          <div key={item.id} className="flex justify-between items-center p-2 bg-slate-50 rounded border border-slate-100">
-                              <span className="text-sm font-medium">{item.name} <span className="text-slate-400 text-xs">x{item.quantity}</span></span>
-                              <button onClick={() => setShoppingList(s => s.filter(i => i.id !== item.id))} className="text-slate-400 hover:text-red-500"><X className="w-4 h-4" /></button>
+                          <div key={item.id} className="flex justify-between items-center p-2 bg-slate-50 rounded border border-slate-100 group">
+                              <span className="text-sm font-medium text-slate-700">{item.name} <span className="text-slate-400 text-xs">x{item.quantity}</span></span>
+                              <button onClick={() => setShoppingList(s => s.filter(i => i.id !== item.id))} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><X className="w-4 h-4" /></button>
                           </div>
                       ))}
-                      {shoppingList.length === 0 && <p className="text-center text-slate-400 text-xs py-4">List is empty.</p>}
+                      {shoppingList.length === 0 && <p className="text-center text-slate-400 text-xs py-8">List is empty.</p>}
                   </div>
                   
-                  <div className="mt-6 pt-6 border-t border-slate-100">
-                      <h4 className="font-bold text-slate-800 mb-3 text-xs uppercase">Supplier Management</h4>
-                      <div className="flex flex-wrap gap-2">
-                          {supplierStatuses.map(s => (
-                              <button 
-                                  key={s.name}
-                                  onClick={() => toggleSupplierBlock(s.name)}
-                                  className={`text-xs px-2 py-1 rounded border flex items-center gap-1 ${s.isBlocked ? 'bg-red-50 border-red-200 text-red-600 line-through' : 'bg-white border-slate-200 text-slate-600'}`}
-                              >
-                                  {s.name}
-                              </button>
-                          ))}
-                      </div>
-                  </div>
+                  {shoppingList.length > 0 && (
+                      <button onClick={() => setShoppingList([])} className="mt-4 text-xs text-red-500 font-bold hover:underline self-center">Clear List</button>
+                  )}
               </div>
 
+              {/* Optimization Results */}
               <div className="lg:col-span-2 space-y-6">
                   {Object.entries(optimizedProcurement.plan).map(([supplier, rawData]) => {
                       const data = rawData as { items: ShoppingItem[], totalEst: number };
@@ -765,15 +684,15 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                                   <p className="text-2xl font-bold text-slate-900">${data.totalEst.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
                               </div>
                           </div>
-                          <div className="space-y-2 relative z-10">
+                          <div className="bg-slate-50 rounded-lg p-3 space-y-2 relative z-10 border border-slate-100">
                               {data.items.map(item => (
-                                  <div key={item.id} className="flex justify-between text-sm border-b border-slate-50 pb-1">
+                                  <div key={item.id} className="flex justify-between text-sm">
                                       <span>{item.name}</span>
                                       <span className="font-bold text-slate-700">x{item.quantity}</span>
                                   </div>
                               ))}
                           </div>
-                          <button className="mt-6 w-full bg-slate-900 text-white py-2 rounded-lg font-bold text-sm hover:bg-slate-800 flex items-center justify-center gap-2">
+                          <button className="mt-4 w-full bg-slate-900 text-white py-2 rounded-lg font-bold text-sm hover:bg-slate-800 flex items-center justify-center gap-2">
                               <Download className="w-4 h-4" /> Export PO PDF
                           </button>
                       </div>
@@ -782,7 +701,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                   {optimizedProcurement.unknownItems.length > 0 && (
                       <div className="bg-orange-50 rounded-xl border border-orange-200 p-6">
                           <h3 className="font-bold text-orange-800 mb-2 flex items-center gap-2"><AlertTriangle className="w-5 h-5"/> No Price History</h3>
-                          <p className="text-xs text-orange-700 mb-4">We couldn't find recent prices for these items from allowed suppliers.</p>
+                          <p className="text-xs text-orange-700 mb-4">We couldn't find recent prices for these items from your allowed suppliers.</p>
                           <ul className="list-disc list-inside text-sm text-orange-800 space-y-1">
                               {optimizedProcurement.unknownItems.map(i => <li key={i.id}>{i.name}</li>)}
                           </ul>
@@ -790,11 +709,28 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                   )}
                   
                   {Object.keys(optimizedProcurement.plan).length === 0 && optimizedProcurement.unknownItems.length === 0 && (
-                      <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-12 text-center">
-                          <ShoppingCart className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                          <p className="text-slate-500">Add items to your shopping list to see the optimized procurement plan.</p>
+                      <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl p-12 text-center h-full flex flex-col items-center justify-center">
+                          <ShoppingCart className="w-12 h-12 text-slate-300 mb-3" />
+                          <p className="text-slate-500 font-medium">Add items to generate a smart buying plan.</p>
+                          <p className="text-slate-400 text-sm mt-1">We'll find the best suppliers based on your history.</p>
                       </div>
                   )}
+
+                  {/* Supplier Blocking */}
+                  <div className="mt-6 pt-6 border-t border-slate-200">
+                      <h4 className="font-bold text-slate-800 mb-3 text-xs uppercase">Supplier Management</h4>
+                      <div className="flex flex-wrap gap-2">
+                          {supplierStatuses.map(s => (
+                              <button 
+                                  key={s.name}
+                                  onClick={() => toggleSupplierBlock(s.name)}
+                                  className={`text-xs px-3 py-1.5 rounded-full border flex items-center gap-1 transition-all ${s.isBlocked ? 'bg-red-50 border-red-200 text-red-600 line-through' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300'}`}
+                              >
+                                  {s.name}
+                              </button>
+                          ))}
+                      </div>
+                  </div>
               </div>
           </div>
       )}
@@ -847,7 +783,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                                       id: `bulk-${Date.now()}-${idx}`,
                                       date: robustParseDate(row['Date']).toISOString(),
                                       poNumber: String(row['Purchase Order #'] || ''),
-                                      brand: String(row['Brand'] || 'N/A'), // Fix here
+                                      brand: String(row['Brand'] || 'N/A'),
                                       itemDescription: String(row['Item'] || ''),
                                       quantity: Number(row['Quantity'] || 0),
                                       unitCost: parseCurrency(String(row['Unit Cost'] || 0)),
@@ -916,7 +852,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
           </div>
       )}
       
-      {activeTab !== 'entry' && activeTab !== 'analysis' && activeTab !== 'overview' && activeTab !== 'job-costing' && activeTab !== 'procurement' && <div>Tab Not Found</div>}
+      {activeTab !== 'entry' && activeTab !== 'analysis' && activeTab !== 'dashboard' && activeTab !== 'job-costing' && activeTab !== 'procurement' && <div>Tab Not Found</div>}
     </div>
   );
 };
