@@ -2,13 +2,22 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ProjectEstimate, EstimateLineItem, MaterialItem, ProjectFile } from '../types';
 import { analyzeBlueprint } from '../services/geminiService';
-import { UploadCloud, Loader2, Plus, Trash2, FileText, Check, ChevronDown, ChevronUp, Calendar, MapPin, User, Phone, Briefcase, X } from 'lucide-react';
+import { UploadCloud, Loader2, Plus, Trash2, FileText, Check, ChevronDown, ChevronUp, Calendar, MapPin, User, Phone, Briefcase, X, AlertCircle } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 
 interface EstimatorProps {
   materials: MaterialItem[];
   projects: ProjectEstimate[]; 
 }
+
+const readFileAsBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+};
 
 export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => {
   const [estimate, setEstimate] = useState<ProjectEstimate>({
@@ -33,6 +42,7 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
   const [activeTab, setActiveTab] = useState<'upload' | 'worksheet' | 'summary'>('upload');
   const [showDetails, setShowDetails] = useState(false); 
   const [showClientSuggestions, setShowClientSuggestions] = useState(false);
+  const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'warning', message: string } | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -45,24 +55,33 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
     c.toLowerCase() !== estimate.client.toLowerCase()
   );
 
+  useEffect(() => {
+      if (notification) {
+          const timer = setTimeout(() => setNotification(null), 5000);
+          return () => clearTimeout(timer);
+      }
+  }, [notification]);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
     // Convert FileList to Array
-    const fileList = Array.from(files) as File[];
+    const fileList: File[] = Array.from(files);
     
     setAnalyzing(true);
-    setProcessingFiles(prev => [...prev, ...fileList.map(f => f.name)]);
+    setNotification(null);
+    setProcessingFiles(fileList.map(f => f.name));
 
-    // Process files sequentially to ensure order and avoid overwhelming browser/API
-    for (const file of fileList) {
-        await new Promise<void>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = async (event) => {
-                const base64 = event.target?.result as string;
+    let itemsAddedCount = 0;
+
+    try {
+        // Process files sequentially
+        for (const file of fileList) {
+            try {
+                const base64 = await readFileAsBase64(file);
                 
-                // Add file to estimate state
+                // Add file to estimate state visual list
                 const newFile: ProjectFile = {
                     id: Date.now().toString() + Math.random().toString(),
                     name: file.name,
@@ -75,13 +94,13 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
                 setEstimate(prev => ({
                     ...prev,
                     projectFiles: [...(prev.projectFiles || []), newFile],
-                    blueprintImage: !prev.blueprintImage ? base64 : prev.blueprintImage // Keep first as main preview if none
+                    blueprintImage: !prev.blueprintImage ? base64 : prev.blueprintImage
                 }));
 
-                try {
-                    // Analyze
-                    const result = await analyzeBlueprint(base64, materials);
-                    
+                // Analyze with Gemini
+                const result = await analyzeBlueprint(base64, materials);
+                
+                if (result.items && result.items.length > 0) {
                     const newItems: EstimateLineItem[] = result.items.map(foundItem => {
                         const match = materials.find(m => 
                             foundItem.description.toLowerCase().includes(m.name.toLowerCase()) || 
@@ -103,22 +122,30 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
                         ...prev,
                         items: [...prev.items, ...newItems]
                     }));
-                } catch (err) {
-                    console.error(`Analysis failed for ${file.name}:`, err);
-                    // Non-blocking error
-                } finally {
-                    setProcessingFiles(prev => prev.filter(name => name !== file.name));
-                    resolve();
+                    itemsAddedCount += newItems.length;
                 }
-            };
-            reader.readAsDataURL(file);
-        });
-    }
+            } catch (err) {
+                console.error(`Analysis failed for ${file.name}:`, err);
+                setNotification({ type: 'warning', message: `Could not analyze ${file.name}. It was added to files but no items were extracted.` });
+            } finally {
+                // Remove from processing list regardless of success/fail
+                setProcessingFiles(prev => prev.filter(name => name !== file.name));
+            }
+        }
 
-    setAnalyzing(false);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    // Optional: Switch tab only if we have items now
-    // setActiveTab('worksheet'); 
+        if (itemsAddedCount > 0) {
+            setNotification({ type: 'success', message: `Success! Extracted ${itemsAddedCount} items from drawings.` });
+            setActiveTab('worksheet');
+        } else if (!notification) {
+            setNotification({ type: 'warning', message: "Files uploaded, but AI found no recognized electrical symbols." });
+        }
+
+    } catch (err) {
+        setNotification({ type: 'error', message: "Critical error during upload. Please try again." });
+    } finally {
+        setAnalyzing(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const removeFile = (fileId: string) => {
@@ -176,7 +203,20 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
   ];
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="flex flex-col h-full bg-slate-50 relative">
+      {/* Notification Toast */}
+      {notification && (
+          <div className={`absolute top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 animate-in slide-in-from-top-5 fade-in duration-300 ${
+              notification.type === 'success' ? 'bg-emerald-600 text-white' : 
+              notification.type === 'warning' ? 'bg-amber-500 text-white' : 
+              'bg-red-600 text-white'
+          }`}>
+              {notification.type === 'success' ? <Check className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
+              <span className="font-medium text-sm">{notification.message}</span>
+              <button onClick={() => setNotification(null)} className="ml-2 hover:bg-white/20 p-1 rounded"><X className="w-4 h-4" /></button>
+          </div>
+      )}
+
       {/* Top Header for Estimator */}
       <div className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm transition-all">
         <div className="px-4 md:px-8 py-4">
