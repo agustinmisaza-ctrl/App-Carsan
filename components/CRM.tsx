@@ -68,13 +68,49 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
         }
     };
 
+    // --- DRAG AND DROP HANDLERS ---
+    const handleDragStart = (e: React.DragEvent, projectId: string) => {
+        e.dataTransfer.setData("projectId", projectId);
+        e.dataTransfer.effectAllowed = "move";
+    };
+
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+    };
+
+    const handleDrop = (e: React.DragEvent, newStatus: ProjectEstimate['status']) => {
+        e.preventDefault();
+        const projectId = e.dataTransfer.getData("projectId");
+        
+        if (projectId && setProjects) {
+            const updatedProjects = projects.map(p => {
+                if (p.id === projectId) {
+                    const today = new Date().toISOString();
+                    const updated = { ...p, status: newStatus };
+                    // Auto-update dates based on status change
+                    if (newStatus === 'Sent' && !p.deliveryDate) updated.deliveryDate = today;
+                    if (newStatus === 'Won' && !p.awardedDate) updated.awardedDate = today;
+                    if (newStatus === 'Ongoing' && !p.startDate) updated.startDate = today.split('T')[0];
+                    return updated;
+                }
+                return p;
+            });
+            setProjects(updatedProjects);
+        }
+    };
+
     // --- PIPELINE KANBAN ---
     const renderKanbanColumn = (title: string, status: ProjectEstimate['status'], colorClass: string) => {
         const items = projects.filter(p => p.status === status);
         const totalValue = items.reduce((sum, p) => sum + (p.contractValue || 0), 0);
 
         return (
-            <div className="flex-1 min-w-[280px] bg-slate-100 rounded-xl flex flex-col h-full border border-slate-200">
+            <div 
+                className="flex-1 min-w-[280px] bg-slate-100 rounded-xl flex flex-col h-full border border-slate-200 transition-colors"
+                onDragOver={handleDragOver}
+                onDrop={(e) => handleDrop(e, status)}
+            >
                 <div className={`p-3 rounded-t-xl border-b border-slate-200 ${colorClass} bg-opacity-10`}>
                     <div className="flex justify-between items-center">
                         <h3 className="font-bold text-slate-700 text-sm uppercase">{title}</h3>
@@ -84,7 +120,12 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
                 </div>
                 <div className="p-2 space-y-2 overflow-y-auto flex-1 custom-scrollbar">
                     {items.map(p => (
-                        <div key={p.id} className="bg-white p-3 rounded-lg shadow-sm border border-slate-200 hover:shadow-md transition cursor-pointer group relative">
+                        <div 
+                            key={p.id} 
+                            draggable={true}
+                            onDragStart={(e) => handleDragStart(e, p.id)}
+                            className="bg-white p-3 rounded-lg shadow-sm border border-slate-200 hover:shadow-md transition cursor-grab active:cursor-grabbing group relative"
+                        >
                             <h4 className="font-bold text-slate-800 text-sm mb-1">{p.name}</h4>
                             <div className="flex items-center gap-1 text-xs text-slate-500 mb-2">
                                 <Briefcase className="w-3 h-3" /> {p.client}
@@ -98,7 +139,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
                                 </span>
                             </div>
                             
-                            {/* Simple Quick Actions */}
+                            {/* Keep Quick Actions as fallback */}
                             {setProjects && (
                                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
                                     {status === 'Draft' && (
@@ -130,8 +171,8 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
                         </div>
                     ))}
                     {items.length === 0 && (
-                        <div className="text-center py-8 text-slate-400 text-xs italic">
-                            No deals in {title}
+                        <div className="text-center py-8 text-slate-400 text-xs italic border-2 border-dashed border-slate-200 rounded-lg m-2">
+                            Arrastra proyectos aquí
                         </div>
                     )}
                 </div>

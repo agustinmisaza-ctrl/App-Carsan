@@ -189,7 +189,17 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
                 const workbook = XLSX.read(data, { type: 'array' });
                 const sheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[sheetName];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                let jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+                // Pre-processing: Clean keys to remove BOM or whitespace
+                jsonData = jsonData.map((row: any) => {
+                    const newRow: any = {};
+                    Object.keys(row).forEach(key => {
+                        const cleanKey = key.trim().replace(/^[\uFEFF\uFFFE]/, '');
+                        newRow[cleanKey] = row[key];
+                    });
+                    return newRow;
+                });
 
                 if (jsonData.length === 0) {
                     alert("Excel file appears to be empty.");
@@ -232,12 +242,13 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
                     // 2. Identify Client
                     let clientName = project?.client;
                     if (!clientName) {
-                        clientName = getValue(row, ['Client', 'Customer', 'Bill To', 'Customer Name', 'Client Name']);
+                        // Fallback to 'Requested By' or 'Approved By' if Client column missing
+                        clientName = getValue(row, ['Client', 'Customer', 'Bill To', 'Customer Name', 'Client Name', 'Requested By', 'Approved By']);
                     }
                     if (!clientName) clientName = 'Unknown Client';
 
                     // 3. Status
-                    const statusRaw = String(getValue(row, ['Status', 'State', 'Stage']) || 'Pending');
+                    const statusRaw = String(getValue(row, ['STATUS', 'Status', 'State', 'Stage']) || 'Pending');
                     let status: ServiceTicket['status'] = 'Sent';
                     const s = statusRaw.toLowerCase();
                     if (s.includes('approv') || s.includes('auth') || s.includes('won') || s.includes('accept')) status = 'Authorized';
@@ -245,19 +256,22 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
                     else if (s.includes('complete') || s.includes('done') || s.includes('paid')) status = 'Completed';
                     else if (s.includes('sched')) status = 'Scheduled';
 
-                    // 4. Amount
+                    // 4. Amount - Handle currency with quotes like "$33,825.00"
                     const amountRaw = getValue(row, ['Total', 'Amount', 'Cost', 'Price', 'Value', 'Est. Total', 'Total Amount']);
                     let amount = 0;
                     if (typeof amountRaw === 'number') amount = amountRaw;
-                    else if (typeof amountRaw === 'string') amount = parseFloat(amountRaw.replace(/[$,]/g, '')) || 0;
+                    else if (typeof amountRaw === 'string') {
+                         // Remove $, commas, AND quotes which might persist from CSV parsing
+                         amount = parseFloat(amountRaw.replace(/[$,"]/g, '')) || 0;
+                    }
 
                     // 5. Title/Description
-                    let title = getValue(row, ['Title', 'Description', 'Subject', 'Name', 'Change Order Name', 'CO Title']);
+                    let title = getValue(row, ['Subject', 'Title', 'Description', 'Name', 'Change Order Name', 'CO Title']);
                     if (!title) title = getValue(row, ['Note', 'Notes', 'Remarks']);
                     if (!title) title = 'Imported Change Order';
 
                     // 6. Number/ID - Critical for updates
-                    const coNumber = getValue(row, ['Number', '#', 'CO#', 'ID', 'Reference', 'Ref']);
+                    const coNumber = getValue(row, ['Change Order #', 'Change Order', 'Number', '#', 'CO#', 'ID', 'Reference', 'Ref']);
 
                     // 7. Date
                     const dateRaw = getValue(row, ['Date', 'Created', 'Issued', 'Date Created']);
@@ -315,7 +329,7 @@ export const ServiceModule: React.FC<ServiceModuleProps> = ({ user, materials, p
                 if(excelInputRef.current) excelInputRef.current.value = '';
             } catch (error) {
                 console.error(error);
-                alert("Failed to parse Excel file.");
+                alert("Failed to parse Excel file. Check format.");
             }
         };
         reader.readAsArrayBuffer(file);

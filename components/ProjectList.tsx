@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { ProjectEstimate, ServiceTicket, ProjectFile } from '../types';
 import { Search, Upload, Filter, MapPin, ImageIcon, Phone, Download, FileText, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Pencil, X, Save, Calendar, DollarSign, User, ExternalLink, List, Map as MapIcon, Plus, Eye, FileSpreadsheet, BellRing, Clock, HardHat, CheckCircle, Briefcase, FolderOpen, FileIcon, Loader2, Sparkles, Wrench, Globe, RefreshCw, Link, Settings, AlertTriangle, Copy, Check, Trash2, FileDiff, Send, Trophy, Play } from 'lucide-react';
@@ -21,8 +22,15 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
   const [activeTab, setActiveTab] = useState<TabView>('estimates');
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // Advanced Filters State
+  const [showFilters, setShowFilters] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>('All');
   const [clientFilter, setClientFilter] = useState<string>('All');
+  const [estimatorFilter, setEstimatorFilter] = useState<string>('All');
+  const [dateRange, setDateRange] = useState<{start: string, end: string}>({ start: '', end: '' });
+  const [valueRange, setValueRange] = useState<{min: string, max: string}>({ min: '', max: '' });
+
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   
   const [editingProject, setEditingProject] = useState<ProjectEstimate | null>(null);
@@ -114,20 +122,57 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
       return subTotal + (subTotal * 0.25);
   };
 
+  // --- CLEAR FILTERS ---
+  const clearFilters = () => {
+      setSearchTerm('');
+      setStatusFilter('All');
+      setClientFilter('All');
+      setEstimatorFilter('All');
+      setDateRange({ start: '', end: '' });
+      setValueRange({ min: '', max: '' });
+  };
+
+  // --- FILTER LOGIC ---
   const filteredProjects = projects
     .filter(p => {
+        // Tab Filter
         if (activeTab === 'ongoing') return p.status === 'Ongoing';
         if (activeTab === 'completed') return p.status === 'Completed';
         if (activeTab === 'estimates') return ['Draft', 'Sent', 'Won', 'Lost', 'Finalized'].includes(p.status);
         return true; 
     })
-    .filter(p => 
-        p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.client.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.address.toLowerCase().includes(searchTerm.toLowerCase())
-    )
-    .filter(p => statusFilter === 'All' || p.status === statusFilter)
-    .filter(p => clientFilter === 'All' || p.client === clientFilter);
+    .filter(p => {
+        // Text Search
+        const term = searchTerm.toLowerCase();
+        return p.name.toLowerCase().includes(term) ||
+               p.client.toLowerCase().includes(term) ||
+               p.address.toLowerCase().includes(term);
+    })
+    .filter(p => {
+        // Status Filter
+        if (statusFilter !== 'All' && p.status !== statusFilter) return false;
+        
+        // Client Filter
+        if (clientFilter !== 'All' && p.client !== clientFilter) return false;
+
+        // Estimator Filter
+        if (estimatorFilter !== 'All' && p.estimator !== estimatorFilter) return false;
+
+        // Date Range Filter
+        if (dateRange.start && new Date(p.dateCreated) < new Date(dateRange.start)) return false;
+        if (dateRange.end) {
+            const endDate = new Date(dateRange.end);
+            endDate.setHours(23, 59, 59, 999);
+            if (new Date(p.dateCreated) > endDate) return false;
+        }
+
+        // Value Range Filter
+        const val = getProjectValue(p);
+        if (valueRange.min && val < parseFloat(valueRange.min)) return false;
+        if (valueRange.max && val > parseFloat(valueRange.max)) return false;
+
+        return true;
+    });
 
   // Apply Sorting
   if (sortConfig) {
@@ -168,28 +213,120 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
         </div>
       </div>
 
-      <div className="flex flex-col md:flex-row gap-4 items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200 shrink-0">
-        <div className="relative flex-1 w-full">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-5 h-5" />
-          <input
-            type="text"
-            placeholder="Buscar por nombre, cliente o dirección..."
-            className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none text-sm"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-        <div className="flex gap-2 items-center">
-            <button 
-                onClick={() => setViewMode(viewMode === 'list' ? 'map' : 'list')}
-                className="p-2.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
-            >
-                {viewMode === 'list' ? <MapIcon className="w-5 h-5" /> : <List className="w-5 h-5" />}
-            </button>
-            <button onClick={handleCreateManualProject} className="bg-slate-900 text-white px-4 py-2.5 rounded-lg text-sm font-bold hover:bg-slate-800 flex items-center gap-2 shadow-sm whitespace-nowrap">
-                <Plus className="w-4 h-4" /> Nuevo Proyecto
-            </button>
-        </div>
+      {/* SEARCH AND FILTER BAR */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 shrink-0 space-y-4">
+          <div className="flex flex-col md:flex-row gap-4 items-center">
+            <div className="relative flex-1 w-full">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-5 h-5" />
+              <input
+                type="text"
+                placeholder="Buscar por nombre, cliente o dirección..."
+                className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none text-sm"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-2 items-center w-full md:w-auto">
+                <button 
+                    onClick={() => setShowFilters(!showFilters)}
+                    className={`p-2.5 rounded-lg border flex items-center gap-2 text-sm font-bold transition-all ${showFilters ? 'bg-blue-50 border-blue-200 text-blue-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                >
+                    <Filter className="w-4 h-4" /> Filtros
+                    {(statusFilter !== 'All' || clientFilter !== 'All' || estimatorFilter !== 'All' || dateRange.start || valueRange.min) && (
+                        <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                    )}
+                </button>
+                <button 
+                    onClick={() => setViewMode(viewMode === 'list' ? 'map' : 'list')}
+                    className="p-2.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
+                >
+                    {viewMode === 'list' ? <MapIcon className="w-5 h-5" /> : <List className="w-5 h-5" />}
+                </button>
+                <button onClick={handleCreateManualProject} className="bg-slate-900 text-white px-4 py-2.5 rounded-lg text-sm font-bold hover:bg-slate-800 flex items-center gap-2 shadow-sm whitespace-nowrap flex-1 md:flex-none justify-center">
+                    <Plus className="w-4 h-4" /> Nuevo Proyecto
+                </button>
+            </div>
+          </div>
+
+          {/* ADVANCED FILTERS PANEL */}
+          {showFilters && (
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-4 border-t border-slate-100 animate-in slide-in-from-top-2">
+                  <div>
+                      <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Estado</label>
+                      <select 
+                          value={statusFilter}
+                          onChange={(e) => setStatusFilter(e.target.value)}
+                          className="w-full text-sm border border-slate-200 rounded-lg p-2 outline-none focus:border-blue-500"
+                      >
+                          <option value="All">Todos los Estados</option>
+                          <option value="Draft">Borrador</option>
+                          <option value="Sent">Enviado</option>
+                          <option value="Won">Ganado</option>
+                          <option value="Lost">Perdido</option>
+                          <option value="Ongoing">En Obra</option>
+                          <option value="Completed">Completado</option>
+                      </select>
+                  </div>
+                  <div>
+                      <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Estimador</label>
+                      <select 
+                          value={estimatorFilter}
+                          onChange={(e) => setEstimatorFilter(e.target.value)}
+                          className="w-full text-sm border border-slate-200 rounded-lg p-2 outline-none focus:border-blue-500"
+                      >
+                          <option value="All">Todos</option>
+                          {uniqueEstimators.map(e => <option key={e} value={e}>{e}</option>)}
+                      </select>
+                  </div>
+                  <div>
+                      <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Rango de Fecha</label>
+                      <div className="flex gap-2">
+                          <input 
+                              type="date" 
+                              value={dateRange.start}
+                              onChange={(e) => setDateRange({...dateRange, start: e.target.value})}
+                              className="w-full text-xs border border-slate-200 rounded-lg p-2 outline-none"
+                              placeholder="Desde"
+                          />
+                          <input 
+                              type="date" 
+                              value={dateRange.end}
+                              onChange={(e) => setDateRange({...dateRange, end: e.target.value})}
+                              className="w-full text-xs border border-slate-200 rounded-lg p-2 outline-none"
+                              placeholder="Hasta"
+                          />
+                      </div>
+                  </div>
+                  <div>
+                      <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Valor ($)</label>
+                      <div className="flex gap-2 items-center">
+                          <input 
+                              type="number" 
+                              value={valueRange.min}
+                              onChange={(e) => setValueRange({...valueRange, min: e.target.value})}
+                              className="w-full text-xs border border-slate-200 rounded-lg p-2 outline-none"
+                              placeholder="Min"
+                          />
+                          <span className="text-slate-300">-</span>
+                          <input 
+                              type="number" 
+                              value={valueRange.max}
+                              onChange={(e) => setValueRange({...valueRange, max: e.target.value})}
+                              className="w-full text-xs border border-slate-200 rounded-lg p-2 outline-none"
+                              placeholder="Max"
+                          />
+                      </div>
+                  </div>
+                  <div className="md:col-span-4 flex justify-end">
+                      <button 
+                          onClick={clearFilters}
+                          className="text-xs text-red-500 hover:text-red-700 font-bold flex items-center gap-1"
+                      >
+                          <Trash2 className="w-3 h-3" /> Limpiar Filtros
+                      </button>
+                  </div>
+              </div>
+          )}
       </div>
 
       {viewMode === 'map' ? (
@@ -202,10 +339,18 @@ export const ProjectList: React.FC<ProjectListProps> = ({ projects, setProjects,
                 <table className="w-full text-left text-sm min-w-[1000px]">
                     <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-wider sticky top-0 z-10">
                         <tr>
-                            <th className="px-6 py-4">Proyecto</th>
-                            <th className="px-6 py-4">Cliente</th>
-                            <th className="px-6 py-4 text-right">Valor</th>
-                            <th className="px-6 py-4 text-center">Estado</th>
+                            <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('name')}>
+                                <div className="flex items-center gap-1">Proyecto <ArrowUpDown className="w-3 h-3" /></div>
+                            </th>
+                            <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('client')}>
+                                <div className="flex items-center gap-1">Cliente <ArrowUpDown className="w-3 h-3" /></div>
+                            </th>
+                            <th className="px-6 py-4 text-right cursor-pointer hover:bg-slate-100" onClick={() => handleSort('value')}>
+                                <div className="flex items-center gap-1 justify-end">Valor <ArrowUpDown className="w-3 h-3" /></div>
+                            </th>
+                            <th className="px-6 py-4 text-center cursor-pointer hover:bg-slate-100" onClick={() => handleSort('status')}>
+                                <div className="flex items-center gap-1 justify-center">Estado <ArrowUpDown className="w-3 h-3" /></div>
+                            </th>
                             <th className="px-6 py-4">Flujo de Trabajo</th>
                             <th className="px-6 py-4 text-center">Acciones</th>
                         </tr>

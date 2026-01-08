@@ -1,7 +1,6 @@
-
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { PurchaseRecord, MaterialItem, ProjectEstimate, ServiceTicket, SupplierStatus, ShoppingItem } from '../types';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell, ReferenceLine, Scatter, AreaChart, Area } from 'recharts';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell, ReferenceLine, Scatter, ScatterChart, AreaChart, Area } from 'recharts';
 import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, PieChart, Sparkles, ListFilter, Flame, AlertTriangle, Trash2, Plus, Save, Briefcase, Wallet, RefreshCw, Calendar, Info, Download, ShoppingCart, Ban, ShieldAlert, ArrowRight, Settings } from 'lucide-react';
 import { extractInvoiceData } from '../services/geminiService';
 import * as XLSX from 'xlsx';
@@ -61,7 +60,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
   const [supplierStatuses, setSupplierStatuses] = useState<SupplierStatus[]>([]);
 
   const [notification, setNotification] = useState<{ type: 'success' | 'error', message: string } | null>(null);
-  const [showMobileSelector, setShowMobileSelector] = useState(false); 
 
   // --- SMART DEFAULT: Switch to All Time if YTD is empty ---
   useEffect(() => {
@@ -302,7 +300,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
           }
 
           // Find lowest recent price (simple logic: lowest price in history from valid suppliers)
-          // Ideally: Weighted by recency, but min price is good for "Smart Shopping"
           validHistory.sort((a, b) => a.unitCost - b.unitCost);
           const bestOption = validHistory[0];
           const bestSupplier = normalizeSupplier(bestOption.supplier);
@@ -484,9 +481,324 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
         </div>
       </div>
 
-      {/* ... (Existing Date Filter and Overview/Analysis Tabs code remains unchanged) ... */}
+      <div className="bg-white p-3 rounded-xl border border-slate-200 flex items-center gap-4 shadow-sm w-fit">
+          <Calendar className="w-4 h-4 text-slate-400" />
+          <input 
+              type="date" 
+              value={dateRange.start}
+              onChange={(e) => setDateRange({...dateRange, start: e.target.value})}
+              className="text-sm font-bold text-slate-700 outline-none"
+          />
+          <span className="text-slate-300">-</span>
+          <input 
+              type="date" 
+              value={dateRange.end}
+              onChange={(e) => setDateRange({...dateRange, end: e.target.value})}
+              className="text-sm font-bold text-slate-700 outline-none"
+          />
+      </div>
+
+      {activeTab === 'overview' && (
+          <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                      <p className="text-xs font-bold text-slate-400 uppercase mb-1">Total Revenue</p>
+                      <p className="text-2xl font-bold text-slate-900">${financialData.totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+                      <div className="flex gap-2 mt-2">
+                          <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded font-bold">Proj: ${(financialData.projectRevenue/1000).toFixed(1)}k</span>
+                          <span className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded font-bold">Svc: ${(financialData.serviceRevenue/1000).toFixed(1)}k</span>
+                      </div>
+                  </div>
+                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                      <p className="text-xs font-bold text-slate-400 uppercase mb-1">Total Expenses</p>
+                      <p className="text-2xl font-bold text-slate-900">${financialData.totalExpenses.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+                      <div className="flex gap-2 mt-2">
+                          <span className="text-[10px] bg-orange-50 text-orange-600 px-2 py-0.5 rounded font-bold">Mat: ${(financialData.materialExpense/1000).toFixed(1)}k</span>
+                          <span className="text-[10px] bg-red-50 text-red-600 px-2 py-0.5 rounded font-bold">Lab: ${(financialData.totalLaborExpense/1000).toFixed(1)}k</span>
+                      </div>
+                  </div>
+                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                      <p className="text-xs font-bold text-slate-400 uppercase mb-1">Net Profit</p>
+                      <p className={`text-2xl font-bold ${financialData.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                          ${financialData.netProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </p>
+                      <p className="text-[10px] text-slate-400 mt-2">After material & labor</p>
+                  </div>
+                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                      <p className="text-xs font-bold text-slate-400 uppercase mb-1">Profit Margin</p>
+                      <p className={`text-2xl font-bold ${financialData.margin >= 20 ? 'text-emerald-600' : 'text-orange-600'}`}>
+                          {financialData.margin.toFixed(1)}%
+                      </p>
+                      <p className="text-[10px] text-slate-400 mt-2">Target: 25%+</p>
+                  </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-80">
+                      <h3 className="font-bold text-slate-800 mb-6">Cash Flow Forecast (Est)</h3>
+                      <ResponsiveContainer width="100%" height="85%">
+                          <AreaChart data={cashFlowData}>
+                              <defs>
+                                  <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
+                                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                                  </linearGradient>
+                                  <linearGradient id="colorExp" x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8}/>
+                                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                                  </linearGradient>
+                              </defs>
+                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} />
+                              <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} tickFormatter={(val) => `$${val/1000}k`} />
+                              <Tooltip />
+                              <Area type="monotone" dataKey="revenue" stroke="#3b82f6" fillOpacity={1} fill="url(#colorRev)" />
+                              <Area type="monotone" dataKey="expenses" stroke="#ef4444" fillOpacity={1} fill="url(#colorExp)" />
+                          </AreaChart>
+                      </ResponsiveContainer>
+                  </div>
+                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-80 flex flex-col justify-center items-center text-center">
+                      <div className="w-32 h-32 rounded-full border-8 border-emerald-100 border-t-emerald-500 flex items-center justify-center">
+                          <div>
+                              <p className="text-2xl font-bold text-emerald-600">{financialData.margin.toFixed(0)}%</p>
+                              <p className="text-[10px] text-slate-400 uppercase font-bold">Margin</p>
+                          </div>
+                      </div>
+                      <h4 className="mt-6 font-bold text-slate-800">Financial Health</h4>
+                      <p className="text-sm text-slate-500 mt-2 px-4">
+                          {financialData.margin > 20 ? "Excellent performance. Keep controlling material costs." : "Margins are tight. Review procurement strategy."}
+                      </p>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {activeTab === 'job-costing' && (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                      <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-xs">
+                          <tr>
+                              <th className="px-6 py-4">Project</th>
+                              <th className="px-6 py-4 text-center">Status</th>
+                              <th className="px-6 py-4 text-right">Contract</th>
+                              <th className="px-6 py-4 text-right">Est. Mat</th>
+                              <th className="px-6 py-4 text-right">Act. Mat</th>
+                              <th className="px-6 py-4 text-center">Variance</th>
+                          </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                          {jobCostingData.map(job => {
+                              const variance = job.estMat - job.actMat;
+                              const isOver = variance < 0;
+                              return (
+                                  <tr key={job.id} className="hover:bg-slate-50">
+                                      <td className="px-6 py-4 font-bold text-slate-900">{job.name}</td>
+                                      <td className="px-6 py-4 text-center">
+                                          <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase border ${job.status === 'Ongoing' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                                              {job.status}
+                                          </span>
+                                      </td>
+                                      <td className="px-6 py-4 text-right font-medium">${job.contract.toLocaleString()}</td>
+                                      <td className="px-6 py-4 text-right text-slate-600">${job.estMat.toLocaleString()}</td>
+                                      <td className="px-6 py-4 text-right text-slate-600">${job.actMat.toLocaleString()}</td>
+                                      <td className="px-6 py-4 text-center">
+                                          <span className={`px-2 py-1 rounded font-bold text-xs ${isOver ? 'text-red-600 bg-red-50' : 'text-emerald-600 bg-emerald-50'}`}>
+                                              {variance > 0 ? '+' : ''}{variance.toLocaleString()}
+                                          </span>
+                                      </td>
+                                  </tr>
+                              );
+                          })}
+                          {jobCostingData.length === 0 && <tr><td colSpan={6} className="text-center py-12 text-slate-400">No active projects found.</td></tr>}
+                      </tbody>
+                  </table>
+              </div>
+          </div>
+      )}
+
+      {activeTab === 'analysis' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[600px]">
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
+                  <div className="p-4 border-b border-slate-200">
+                      <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                          <input 
+                              placeholder="Search item..." 
+                              className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm outline-none"
+                              value={searchTerm}
+                              onChange={(e) => setSearchTerm(e.target.value)}
+                          />
+                      </div>
+                  </div>
+                  <div className="flex-1 overflow-y-auto">
+                      {processedItemsList.map(item => (
+                          <div 
+                              key={item.name} 
+                              onClick={() => setSelectedItem(item.name)}
+                              className={`p-3 border-b border-slate-50 cursor-pointer hover:bg-blue-50 transition flex justify-between items-center ${selectedItem === item.name ? 'bg-blue-50 border-blue-200' : ''}`}
+                          >
+                              <div className="truncate pr-4 flex-1">
+                                  <p className="font-bold text-sm text-slate-800 truncate">{item.name}</p>
+                                  <p className="text-xs text-slate-400">{item.count} purchases</p>
+                              </div>
+                              <div className="text-right">
+                                  <p className="font-bold text-xs text-emerald-600">${item.total.toLocaleString()}</p>
+                              </div>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+
+              <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col">
+                  {selectedItem ? (
+                      <>
+                          <div className="flex justify-between items-start mb-6">
+                              <div>
+                                  <h3 className="font-bold text-xl text-slate-900">{selectedItem}</h3>
+                                  <p className="text-sm text-slate-500">Price History across Suppliers</p>
+                              </div>
+                          </div>
+                          
+                          <div className="flex-1 min-h-[300px]">
+                              <ResponsiveContainer width="100%" height="100%">
+                                  <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                                      <CartesianGrid strokeDasharray="3 3" />
+                                      <XAxis dataKey="timestamp" domain={['auto', 'auto']} name="Date" tickFormatter={(time) => new Date(time).toLocaleDateString()} type="number" />
+                                      <YAxis dataKey="price" name="Price" unit="$" />
+                                      <Tooltip cursor={{ strokeDasharray: '3 3' }} labelFormatter={(l) => new Date(l).toLocaleDateString()} />
+                                      <Legend />
+                                      {Array.from(new Set(multiSupplierChartData.map(d => d.supplierName))).map((sup, i) => (
+                                          <Scatter 
+                                              key={sup} 
+                                              name={sup} 
+                                              data={multiSupplierChartData.filter(d => d.supplierName === sup)} 
+                                              fill={supplierColors[i % supplierColors.length]} 
+                                          />
+                                      ))}
+                                  </ScatterChart>
+                              </ResponsiveContainer>
+                          </div>
+
+                          <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+                              {selectedItemSupplierStats.map((stat, i) => (
+                                  <div key={stat.name} className={`p-3 rounded-lg border ${i === 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
+                                      <p className="text-xs font-bold text-slate-500 uppercase truncate">{stat.name}</p>
+                                      <p className="text-lg font-bold text-slate-900 mt-1">${stat.lastPrice.toFixed(2)}</p>
+                                      <p className="text-[10px] text-slate-400">Avg: ${stat.avgPrice.toFixed(2)}</p>
+                                  </div>
+                              ))}
+                          </div>
+                      </>
+                  ) : (
+                      <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
+                          <TrendingUp className="w-16 h-16 mb-4 opacity-20" />
+                          <p>Select an item to analyze pricing trends.</p>
+                      </div>
+                  )}
+              </div>
+          </div>
+      )}
+
+      {activeTab === 'procurement' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                  <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><ShoppingCart className="w-5 h-5"/> Shopping List</h3>
+                  <div className="flex gap-2 mb-4">
+                      <input 
+                          className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none"
+                          placeholder="Item name..."
+                          value={newItemName}
+                          onChange={(e) => setNewItemName(e.target.value)}
+                      />
+                      <input 
+                          type="number" 
+                          className="w-16 border border-slate-300 rounded-lg px-2 py-2 text-sm outline-none"
+                          value={newItemQty}
+                          onChange={(e) => setNewItemQty(Number(e.target.value))}
+                      />
+                      <button onClick={handleAddItemToShoppingList} className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700">
+                          <Plus className="w-5 h-5" />
+                      </button>
+                  </div>
+                  <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                      {shoppingList.map(item => (
+                          <div key={item.id} className="flex justify-between items-center p-2 bg-slate-50 rounded border border-slate-100">
+                              <span className="text-sm font-medium">{item.name} <span className="text-slate-400 text-xs">x{item.quantity}</span></span>
+                              <button onClick={() => setShoppingList(s => s.filter(i => i.id !== item.id))} className="text-slate-400 hover:text-red-500"><X className="w-4 h-4" /></button>
+                          </div>
+                      ))}
+                      {shoppingList.length === 0 && <p className="text-center text-slate-400 text-xs py-4">List is empty.</p>}
+                  </div>
+                  
+                  <div className="mt-6 pt-6 border-t border-slate-100">
+                      <h4 className="font-bold text-slate-800 mb-3 text-xs uppercase">Supplier Management</h4>
+                      <div className="flex flex-wrap gap-2">
+                          {supplierStatuses.map(s => (
+                              <button 
+                                  key={s.name}
+                                  onClick={() => toggleSupplierBlock(s.name)}
+                                  className={`text-xs px-2 py-1 rounded border flex items-center gap-1 ${s.isBlocked ? 'bg-red-50 border-red-200 text-red-600 line-through' : 'bg-white border-slate-200 text-slate-600'}`}
+                              >
+                                  {s.name}
+                              </button>
+                          ))}
+                      </div>
+                  </div>
+              </div>
+
+              <div className="lg:col-span-2 space-y-6">
+                  {Object.entries(optimizedProcurement.plan).map(([supplier, rawData]) => {
+                      const data = rawData as { items: ShoppingItem[], totalEst: number };
+                      return (
+                      <div key={supplier} className="bg-white rounded-xl shadow-sm border border-emerald-100 p-6 relative overflow-hidden">
+                          <div className="absolute top-0 right-0 p-4 opacity-10">
+                              <Award className="w-24 h-24 text-emerald-600" />
+                          </div>
+                          <div className="flex justify-between items-start mb-4 relative z-10">
+                              <div>
+                                  <h3 className="font-bold text-xl text-slate-900">{supplier}</h3>
+                                  <p className="text-emerald-600 text-sm font-bold flex items-center gap-1"><Sparkles className="w-3 h-3" /> Best Price Option</p>
+                              </div>
+                              <div className="text-right">
+                                  <p className="text-xs text-slate-400 uppercase font-bold">Est. Total</p>
+                                  <p className="text-2xl font-bold text-slate-900">${data.totalEst.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+                              </div>
+                          </div>
+                          <div className="space-y-2 relative z-10">
+                              {data.items.map(item => (
+                                  <div key={item.id} className="flex justify-between text-sm border-b border-slate-50 pb-1">
+                                      <span>{item.name}</span>
+                                      <span className="font-bold text-slate-700">x{item.quantity}</span>
+                                  </div>
+                              ))}
+                          </div>
+                          <button className="mt-6 w-full bg-slate-900 text-white py-2 rounded-lg font-bold text-sm hover:bg-slate-800 flex items-center justify-center gap-2">
+                              <Download className="w-4 h-4" /> Export PO PDF
+                          </button>
+                      </div>
+                  )})}
+                  
+                  {optimizedProcurement.unknownItems.length > 0 && (
+                      <div className="bg-orange-50 rounded-xl border border-orange-200 p-6">
+                          <h3 className="font-bold text-orange-800 mb-2 flex items-center gap-2"><AlertTriangle className="w-5 h-5"/> No Price History</h3>
+                          <p className="text-xs text-orange-700 mb-4">We couldn't find recent prices for these items from allowed suppliers.</p>
+                          <ul className="list-disc list-inside text-sm text-orange-800 space-y-1">
+                              {optimizedProcurement.unknownItems.map(i => <li key={i.id}>{i.name}</li>)}
+                          </ul>
+                      </div>
+                  )}
+                  
+                  {Object.keys(optimizedProcurement.plan).length === 0 && optimizedProcurement.unknownItems.length === 0 && (
+                      <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-12 text-center">
+                          <ShoppingCart className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                          <p className="text-slate-500">Add items to your shopping list to see the optimized procurement plan.</p>
+                      </div>
+                  )}
+              </div>
+          </div>
+      )}
       
-      {/* (Adding QB Button to Entry Tab) */}
       {activeTab === 'entry' && (
           <div className="space-y-6">
               {/* QuickBooks Integration Banner */}
