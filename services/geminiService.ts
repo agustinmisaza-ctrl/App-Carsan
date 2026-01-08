@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, Chat, LiveServerMessage, Modality } from "@google/genai";
 import { MaterialItem, AnalysisResult, Lead, ProjectEstimate, ServiceTicket, PurchaseRecord } from "../types";
 
@@ -38,6 +39,30 @@ const leadSchema = {
     notes: { type: Type.STRING, description: "Summary of the request or project details" }
   },
   required: ["name"]
+};
+
+// Schema for Email Analysis
+const emailAnalysisSchema = {
+  type: Type.OBJECT,
+  properties: {
+    clientName: { type: Type.STRING, description: "Name of the client company or individual requesting work" },
+    projectName: { type: Type.STRING, description: "Inferred project name (e.g., 'Smith Residence Renovation' or 'Downtown Office Wiring')" },
+    summary: { type: Type.STRING, description: "A concise 1-2 sentence summary of what is being requested" },
+    urgency: { type: Type.STRING, description: "Low, Medium, or High based on language used" },
+    keyDetails: { 
+      type: Type.ARRAY, 
+      items: { type: Type.STRING },
+      description: "Bullet points of specific electrical requirements mentioned (e.g., 'Needs 200A upgrade', 'Kitchen remodel')" 
+    },
+    contactInfo: {
+        type: Type.OBJECT,
+        properties: {
+            phone: { type: Type.STRING, description: "Phone number if present" },
+            address: { type: Type.STRING, description: "Job site address if present" }
+        }
+    }
+  },
+  required: ["clientName", "projectName", "summary"]
 };
 
 // Schema for Invoice Extraction
@@ -226,6 +251,54 @@ export const extractLeadFromText = async (text: string): Promise<Partial<Lead>> 
     } catch (e) {
         console.error("Failed to extract lead", e);
         return {};
+    }
+};
+
+export const analyzeIncomingEmail = async (subject: string, body: string): Promise<any> => {
+    if (!process.env.API_KEY) throw new Error("API Key not found");
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+    const prompt = `
+      Analyze this incoming email for an electrical contracting business.
+      
+      Email Subject: "${subject}"
+      Email Body: "${body}"
+      
+      Task:
+      1. Identify the Client Name (Company or Person).
+      2. Identify or Infer the Project Name (e.g. "Smith Kitchen Remodel").
+      3. Summarize the request in 1-2 sentences.
+      4. List any specific technical details (voltage, amperage, devices).
+      5. Determine urgency.
+      
+      Return JSON format matching schema.
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: GEMINI_MODEL,
+            contents: {
+                parts: [{ text: prompt }]
+            },
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: emailAnalysisSchema,
+                temperature: 0.1
+            }
+        });
+
+        let jsonStr = response.text || '{}';
+        jsonStr = jsonStr.trim().replace(/^```(json)?/i, '').replace(/```$/, '');
+        return JSON.parse(jsonStr);
+    } catch (e) {
+        console.error("Email analysis failed", e);
+        return {
+            clientName: "Unknown",
+            projectName: subject,
+            summary: body.substring(0, 100),
+            urgency: "Unknown",
+            keyDetails: []
+        };
     }
 };
 
