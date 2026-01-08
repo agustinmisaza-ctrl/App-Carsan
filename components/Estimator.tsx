@@ -1,13 +1,13 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { ProjectEstimate, EstimateLineItem, MaterialItem } from '../types';
+import { ProjectEstimate, EstimateLineItem, MaterialItem, ProjectFile } from '../types';
 import { analyzeBlueprint } from '../services/geminiService';
-import { UploadCloud, Loader2, Plus, Trash2, FileText, Check, ChevronDown, ChevronUp, Calendar, MapPin, User, Phone, Briefcase } from 'lucide-react';
+import { UploadCloud, Loader2, Plus, Trash2, FileText, Check, ChevronDown, ChevronUp, Calendar, MapPin, User, Phone, Briefcase, X } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 
 interface EstimatorProps {
   materials: MaterialItem[];
-  projects: ProjectEstimate[]; // Added to access existing clients/estimators
+  projects: ProjectEstimate[]; 
 }
 
 export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => {
@@ -25,11 +25,13 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
     status: 'Draft',
     laborRate: 75,
     items: [],
+    projectFiles: [] // Initialize empty
   });
 
   const [analyzing, setAnalyzing] = useState(false);
+  const [processingFiles, setProcessingFiles] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<'upload' | 'worksheet' | 'summary'>('upload');
-  const [showDetails, setShowDetails] = useState(false); // Toggle for full form
+  const [showDetails, setShowDetails] = useState(false); 
   const [showClientSuggestions, setShowClientSuggestions] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -44,53 +46,86 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
   );
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
-    // Reset input value to allow re-selecting the same file if needed
-    if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+    // Convert FileList to Array
+    const fileList = Array.from(files) as File[];
+    
+    setAnalyzing(true);
+    setProcessingFiles(prev => [...prev, ...fileList.map(f => f.name)]);
+
+    // Process files sequentially to ensure order and avoid overwhelming browser/API
+    for (const file of fileList) {
+        await new Promise<void>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                const base64 = event.target?.result as string;
+                
+                // Add file to estimate state
+                const newFile: ProjectFile = {
+                    id: Date.now().toString() + Math.random().toString(),
+                    name: file.name,
+                    category: 'Plan',
+                    uploadDate: new Date().toISOString(),
+                    fileData: base64,
+                    fileType: file.type
+                };
+
+                setEstimate(prev => ({
+                    ...prev,
+                    projectFiles: [...(prev.projectFiles || []), newFile],
+                    blueprintImage: !prev.blueprintImage ? base64 : prev.blueprintImage // Keep first as main preview if none
+                }));
+
+                try {
+                    // Analyze
+                    const result = await analyzeBlueprint(base64, materials);
+                    
+                    const newItems: EstimateLineItem[] = result.items.map(foundItem => {
+                        const match = materials.find(m => 
+                            foundItem.description.toLowerCase().includes(m.name.toLowerCase()) || 
+                            m.name.toLowerCase().includes(foundItem.description.toLowerCase())
+                        );
+
+                        return {
+                            id: Date.now() + Math.random().toString(),
+                            description: `${foundItem.description} (${file.name})`, // Tag source file
+                            quantity: foundItem.count,
+                            materialId: match?.id,
+                            unitMaterialCost: match?.materialCost || 0,
+                            unitLaborHours: match?.laborHours || 0.5,
+                            laborRate: estimate.laborRate
+                        };
+                    });
+
+                    setEstimate(prev => ({
+                        ...prev,
+                        items: [...prev.items, ...newItems]
+                    }));
+                } catch (err) {
+                    console.error(`Analysis failed for ${file.name}:`, err);
+                    // Non-blocking error
+                } finally {
+                    setProcessingFiles(prev => prev.filter(name => name !== file.name));
+                    resolve();
+                }
+            };
+            reader.readAsDataURL(file);
+        });
     }
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const base64 = event.target?.result as string;
-      setEstimate(prev => ({ ...prev, blueprintImage: base64 }));
-      
-      setAnalyzing(true);
-      try {
-        const result = await analyzeBlueprint(base64, materials);
-        
-        const newItems: EstimateLineItem[] = result.items.map(foundItem => {
-            const match = materials.find(m => 
-                foundItem.description.toLowerCase().includes(m.name.toLowerCase()) || 
-                m.name.toLowerCase().includes(foundItem.description.toLowerCase())
-            );
+    setAnalyzing(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    // Optional: Switch tab only if we have items now
+    // setActiveTab('worksheet'); 
+  };
 
-            return {
-                id: Date.now() + Math.random().toString(),
-                description: foundItem.description,
-                quantity: foundItem.count,
-                materialId: match?.id,
-                unitMaterialCost: match?.materialCost || 0,
-                unitLaborHours: match?.laborHours || 0.5,
-                laborRate: estimate.laborRate
-            };
-        });
-
-        setEstimate(prev => ({
-            ...prev,
-            items: [...prev.items, ...newItems]
-        }));
-        setActiveTab('worksheet');
-      } catch (err) {
-        console.error("Blueprint Analysis Failed:", err);
-        alert("Failed to analyze blueprint. Please check the console for details or try again with a clearer image.");
-      } finally {
-        setAnalyzing(false);
-      }
-    };
-    reader.readAsDataURL(file);
+  const removeFile = (fileId: string) => {
+      setEstimate(prev => ({
+          ...prev,
+          projectFiles: prev.projectFiles?.filter(f => f.id !== fileId) || []
+      }));
   };
 
   const updateLineItem = (id: string, field: keyof EstimateLineItem, value: number | string) => {
@@ -344,10 +379,11 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
         
         {/* VIEW: UPLOAD */}
         {activeTab === 'upload' && (
-            <div className="max-w-4xl mx-auto mt-8">
+            <div className="max-w-6xl mx-auto mt-8">
+                {/* File Drop / Action Area */}
                 <div 
-                    className={`bg-white rounded-2xl border-2 border-dashed p-12 text-center transition-all cursor-pointer group relative overflow-hidden ${
-                        analyzing ? 'border-blue-400 bg-blue-50/10' : 'border-slate-300 hover:border-blue-500 hover:bg-slate-50'
+                    className={`bg-white rounded-2xl border-2 border-dashed p-12 text-center transition-all group relative overflow-hidden mb-8 ${
+                        analyzing ? 'border-blue-400 bg-blue-50/10' : 'border-slate-300 hover:border-blue-500 hover:bg-slate-50 cursor-pointer'
                     }`}
                     onClick={() => !analyzing && fileInputRef.current?.click()}
                 >
@@ -355,6 +391,7 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
                         ref={fileInputRef} 
                         type="file" 
                         accept="image/*,.pdf"
+                        multiple // ENABLE MULTI-FILE UPLOAD
                         className="hidden" 
                         onChange={handleFileUpload}
                     />
@@ -362,37 +399,88 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
                     {/* Background Pattern */}
                     <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[radial-gradient(#3b82f6_1px,transparent_1px)] [background-size:16px_16px]"></div>
 
-                    {analyzing ? (
-                        <div className="flex flex-col items-center justify-center py-12">
-                            <div className="relative">
+                    <div className="flex flex-col items-center py-4">
+                        {analyzing ? (
+                            <div className="relative mb-6">
                                 <div className="absolute inset-0 bg-blue-500 blur-xl opacity-20 animate-pulse rounded-full"></div>
                                 <Loader2 className="w-16 h-16 text-blue-600 animate-spin relative z-10" />
                             </div>
-                            <h3 className="text-xl font-bold text-slate-900 mt-6">Analyzing Blueprint</h3>
-                            <p className="text-slate-500 mt-2">Gemini is identifying electrical components...</p>
-                        </div>
-                    ) : estimate.blueprintImage ? (
-                        <div className="flex flex-col items-center">
-                            <img src={estimate.blueprintImage} alt="Blueprint" className="max-h-[500px] w-full object-contain shadow-2xl rounded-lg mb-6 border border-slate-200" />
-                            <button className="text-sm font-medium text-blue-600 hover:text-blue-700 bg-blue-50 px-4 py-2 rounded-full border border-blue-100 transition-colors">
-                                Replace File
-                            </button>
-                        </div>
-                    ) : (
-                        <div className="flex flex-col items-center py-8">
-                            <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                        ) : (
+                            <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform shadow-sm">
                                 <UploadCloud className="w-10 h-10" />
                             </div>
-                            <h3 className="text-2xl font-bold text-slate-900 mb-3">Upload Electrical Plan</h3>
-                            <p className="text-slate-500 mb-8 max-w-md leading-relaxed">
-                                Upload a PDF or Image of the electrical blueprint. The AI will scan for symbols (outlets, switches, panels) to start your estimate.
-                            </p>
+                        )}
+                        
+                        <h3 className="text-2xl font-bold text-slate-900 mb-3">
+                            {analyzing ? 'Analyzing Blueprints...' : 'Upload Drawing Sets'}
+                        </h3>
+                        <p className="text-slate-500 mb-8 max-w-md leading-relaxed mx-auto">
+                            {analyzing 
+                                ? `Processing ${processingFiles.length} file(s). Gemini AI is identifying components...` 
+                                : 'Select multiple PDF or Image files. The AI will scan all sets for electrical symbols to build your estimate.'
+                            }
+                        </p>
+                        {!analyzing && (
                             <button className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-blue-700 transition shadow-lg shadow-blue-500/20">
-                                Select File
+                                Select Files
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* Uploaded Files Grid */}
+                {(estimate.projectFiles && estimate.projectFiles.length > 0) && (
+                    <div>
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
+                                <FileText className="w-5 h-5 text-blue-500" /> 
+                                Uploaded Sets ({estimate.projectFiles.length})
+                            </h3>
+                            <button onClick={() => setActiveTab('worksheet')} className="text-blue-600 font-bold text-sm hover:underline flex items-center gap-1">
+                                Go to Worksheet <ChevronDown className="w-4 h-4 -rotate-90" />
                             </button>
                         </div>
-                    )}
-                </div>
+                        
+                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                            {estimate.projectFiles.map(file => (
+                                <div key={file.id} className="relative group bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden aspect-[3/4] flex flex-col">
+                                    <div className="flex-1 bg-slate-100 flex items-center justify-center overflow-hidden relative">
+                                        {file.fileType?.includes('image') ? (
+                                            <img src={file.fileData} className="w-full h-full object-cover" alt={file.name} />
+                                        ) : (
+                                            <div className="flex flex-col items-center text-slate-400">
+                                                <FileText className="w-12 h-12 mb-2" />
+                                                <span className="text-[10px] font-bold uppercase">PDF Document</span>
+                                            </div>
+                                        )}
+                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); removeFile(file.id); }}
+                                                className="bg-red-500 text-white p-2 rounded-full hover:bg-red-600 transform scale-90 hover:scale-100 transition"
+                                                title="Remove File"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="p-3 bg-white border-t border-slate-100">
+                                        <p className="text-xs font-bold text-slate-700 truncate" title={file.name}>{file.name}</p>
+                                        <p className="text-[10px] text-slate-400 mt-0.5">{new Date(file.uploadDate).toLocaleDateString()}</p>
+                                    </div>
+                                </div>
+                            ))}
+                            
+                            {/* Loading Placeholders */}
+                            {processingFiles.map((name, i) => (
+                                <div key={i} className="bg-blue-50 border border-blue-200 border-dashed rounded-xl flex flex-col items-center justify-center p-4 animate-pulse aspect-[3/4]">
+                                    <Loader2 className="w-8 h-8 text-blue-500 animate-spin mb-3" />
+                                    <span className="text-xs text-blue-600 font-bold text-center w-full truncate px-2">{name}</span>
+                                    <span className="text-[10px] text-blue-400 mt-1">Analyzing...</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
             </div>
         )}
 
@@ -490,7 +578,7 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
                                 <FileText className="w-8 h-8" />
                             </div>
                             <h3 className="text-slate-900 font-semibold">No Items Yet</h3>
-                            <p className="text-slate-500 text-sm mt-1 mb-4">Upload a blueprint to auto-detect items or add them manually.</p>
+                            <p className="text-slate-500 text-sm mt-1 mb-4">Upload blueprints to auto-detect items or add them manually.</p>
                             <button onClick={addManualItem} className="text-blue-600 font-medium text-sm hover:underline">Add First Item</button>
                         </div>
                     )}
