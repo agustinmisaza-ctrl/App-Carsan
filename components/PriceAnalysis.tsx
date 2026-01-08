@@ -852,7 +852,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
           </div>
       )}
       
-      {activeTab !== 'entry' && activeTab !== 'analysis' && activeTab !== 'dashboard' && activeTab !== 'job-costing' && activeTab !== 'procurement' && <div>Tab Not Found</div>}
+      {activeTab !== 'entry' && activeTab !== 'analysis' && activeTab !== 'dashboard' && activeTab !== 'procurement' && <div>Tab Not Found</div>}
     </div>
   );
 };
