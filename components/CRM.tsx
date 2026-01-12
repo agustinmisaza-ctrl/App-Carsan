@@ -1,9 +1,9 @@
 
 import React, { useState } from 'react';
 import { Lead, ProjectEstimate } from '../types';
-import { fetchOutlookEmails, sendOutlookEmail } from '../services/emailIntegration';
+import { fetchOutlookEmails, sendOutlookEmail, getStoredClientId, setStoredClientId, getStoredTenantId, setStoredTenantId } from '../services/emailIntegration';
 import { analyzeIncomingEmail } from '../services/geminiService';
-import { Trello, List, Search, RefreshCw, Briefcase, Mail, CheckCircle, XCircle, ArrowRight, Trash2, Eye, Sparkles, MapPin, Phone, AlertTriangle, X, Send, Plus, Loader2 } from 'lucide-react';
+import { Trello, List, Search, RefreshCw, Briefcase, Mail, CheckCircle, XCircle, ArrowRight, Trash2, Eye, Sparkles, MapPin, Phone, AlertTriangle, X, Send, Plus, Loader2, Settings } from 'lucide-react';
 
 interface CRMProps {
     leads: Lead[];
@@ -22,6 +22,11 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
     
     // Detailed View State
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+
+    // Settings State
+    const [showSettings, setShowSettings] = useState(false);
+    const [clientId, setClientId] = useState(getStoredClientId() || '');
+    const [tenantId, setTenantId] = useState(getStoredTenantId() || '');
 
     // Email & Manual Entry State
     const [emailCompose, setEmailCompose] = useState<{to: string, name: string, subject: string, body: string} | null>(null);
@@ -161,6 +166,13 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
         setNewLead({ name: '', email: '', company: '', phone: '', source: 'Manual', notes: '' });
     };
 
+    const handleSaveSettings = () => {
+        setStoredClientId(clientId);
+        setStoredTenantId(tenantId);
+        setShowSettings(false);
+        alert("Settings saved. Please try syncing again.");
+    };
+
     // --- DRAG AND DROP HANDLERS ---
     const handleDragStart = (e: React.DragEvent, projectId: string) => {
         e.dataTransfer.setData("projectId", projectId);
@@ -275,6 +287,54 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
     return (
         <div className="p-4 md:p-8 max-w-7xl mx-auto h-full flex flex-col space-y-6 relative">
             
+            {/* SETTINGS MODAL */}
+            {showSettings && (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+                        <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                            <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                                <Settings className="w-4 h-4 text-slate-500" /> Outlook Configuration
+                            </h3>
+                            <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5"/></button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <p className="text-xs text-slate-500 mb-4">
+                                To sync emails, you must register an app in Azure AD and provide the Client ID here. 
+                                <br/>
+                                <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noreferrer" className="text-blue-600 underline">Azure Portal</a>
+                            </p>
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">Client ID (Application ID)</label>
+                                <input 
+                                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1 focus:ring-2 focus:ring-blue-500 outline-none"
+                                    value={clientId}
+                                    onChange={(e) => setClientId(e.target.value)}
+                                    placeholder="e.g. f13f2359-eec6-..."
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">Tenant ID (Optional)</label>
+                                <input 
+                                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1 focus:ring-2 focus:ring-blue-500 outline-none"
+                                    value={tenantId}
+                                    onChange={(e) => setTenantId(e.target.value)}
+                                    placeholder="common"
+                                />
+                            </div>
+                        </div>
+                        <div className="p-4 border-t border-slate-100 flex justify-end gap-2 bg-slate-50">
+                            <button onClick={() => setShowSettings(false)} className="px-4 py-2 text-slate-600 text-sm font-bold hover:bg-slate-100 rounded-lg">Cancel</button>
+                            <button 
+                                onClick={handleSaveSettings}
+                                className="px-6 py-2 bg-slate-900 text-white text-sm font-bold rounded-lg hover:bg-slate-800"
+                            >
+                                Save
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* EMAIL COMPOSE MODAL */}
             {emailCompose && (
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4 backdrop-blur-sm">
@@ -392,6 +452,13 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
                         </div>
                         <div className="flex items-center gap-2">
                             {analysisProgress && <span className="text-xs text-blue-600 font-medium animate-pulse">{analysisProgress}</span>}
+                            <button 
+                                onClick={() => setShowSettings(true)}
+                                className="bg-white border border-slate-300 text-slate-700 p-2 rounded-lg hover:bg-slate-50"
+                                title="Configure Outlook"
+                            >
+                                <Settings className="w-4 h-4" />
+                            </button>
                             <button 
                                 onClick={() => setShowAddLead(true)}
                                 className="bg-white border border-slate-300 text-slate-700 px-3 py-2 rounded-lg text-sm font-bold hover:bg-slate-50 flex items-center gap-2"

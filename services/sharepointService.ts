@@ -1,6 +1,7 @@
 
 import { getGraphToken } from "./emailIntegration";
 import { ProjectEstimate, ProjectMapping, ServiceTicket, TicketMapping } from "../types";
+import { robustParseDate } from "../utils/purchaseData";
 
 export interface SPSite { id: string; displayName: string; webUrl: string; }
 export interface SPList { id: string; displayName: string; }
@@ -120,6 +121,13 @@ export const fetchMappedListItems = async (
         if (!clientName) clientName = f['Customer'];
         if (!clientName) clientName = 'Desconocido';
 
+        // Robust Date Parsing
+        const rawDate = f[mapping.dateCreated] || item.createdDateTime;
+        const cleanDate = robustParseDate(rawDate).toISOString();
+
+        const rawAwarded = f[mapping.awardedDate];
+        const cleanAwarded = rawAwarded ? robustParseDate(rawAwarded).toISOString() : undefined;
+
         return {
             id: `sp-${item.id}`,
             name: projName,
@@ -128,8 +136,8 @@ export const fetchMappedListItems = async (
             contractValue: parseFloat(f[mapping.contractValue]) || 0,
             address: f[mapping.address] || 'Miami, FL',
             estimator: f[mapping.estimator] || '',
-            dateCreated: f[mapping.dateCreated] || item.createdDateTime || new Date().toISOString(),
-            awardedDate: f[mapping.awardedDate] || null,
+            dateCreated: cleanDate,
+            awardedDate: cleanAwarded,
             items: [],
             laborRate: 75
         } as ProjectEstimate;
@@ -161,6 +169,10 @@ export const fetchMappedTickets = async (
         // Try to link to a project
         const projectName = f[mapping.projectName];
         const linkedProject = existingProjects.find(p => p.name === projectName || p.id === projectName);
+
+        // Robust Date Parsing
+        const rawDate = f[mapping.dateCreated] || item.createdDateTime;
+        const cleanDate = robustParseDate(rawDate).toISOString();
         
         const ticket: ServiceTicket = {
             id: `sp-ticket-${item.id}`,
@@ -170,7 +182,7 @@ export const fetchMappedTickets = async (
             projectId: linkedProject ? linkedProject.id : '',
             address: linkedProject ? linkedProject.address : 'Miami, FL',
             technician: 'Imported',
-            dateCreated: f[mapping.dateCreated] || item.createdDateTime || new Date().toISOString(),
+            dateCreated: cleanDate,
             laborRate: 85,
             notes: ticketTitle,
             items: [{
