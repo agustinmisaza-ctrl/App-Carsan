@@ -1,8 +1,8 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { PurchaseRecord, MaterialItem, ProjectEstimate, ServiceTicket, SupplierStatus, ShoppingItem } from '../types';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area, Cell } from 'recharts';
-import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, Sparkles, AlertTriangle, Trash2, Plus, ShoppingCart, RefreshCw, Calendar, Download, Settings, FileText } from 'lucide-react';
+import { PurchaseRecord, MaterialItem, ProjectEstimate, ServiceTicket, SupplierStatus, ShoppingItem, VarianceItem } from '../types';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area, Cell, PieChart, Pie } from 'recharts';
+import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, Sparkles, AlertTriangle, Trash2, Plus, ShoppingCart, RefreshCw, Calendar, Download, Settings, FileText, ArrowRightLeft, Percent, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { extractInvoiceData } from '../services/geminiService';
 import * as XLSX from 'xlsx';
 import { parseCurrency, normalizeSupplier, robustParseDate } from '../utils/purchaseData';
@@ -19,11 +19,13 @@ interface PriceAnalysisProps {
 }
 
 export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], setPurchases, materials = [], setMaterials, projects = [], tickets = [] }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'analysis' | 'procurement' | 'entry'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'analysis' | 'procurement' | 'entry' | 'variance'>('dashboard');
   const [selectedItem, setSelectedItem] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortByValue, setSortByValue] = useState(true);
-  const [includeBenchmarks, setIncludeBenchmarks] = useState(false);
+  
+  // Variance State
+  const [selectedVarianceProject, setSelectedVarianceProject] = useState<string>('All');
   
   // Date Filter State
   const currentYear = new Date().getFullYear();
@@ -87,6 +89,91 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
       });
   }, [purchases]);
 
+  // --- VARIANCE CALCULATIONS ---
+  const varianceData = useMemo(() => {
+    if (!projects) return { projectSummaries: [], itemVariances: [] };
+
+    const summaries = projects.map(proj => {
+      // 1. Calculate Estimated Material Cost
+      const estMatCost = proj.items.reduce((sum, item) => sum + (item.quantity * item.unitMaterialCost), 0);
+
+      // 2. Calculate Actual Purchase Cost for this project
+      const projectPurchases = purchases.filter(p => 
+        p.projectName.toLowerCase().trim() === proj.name.toLowerCase().trim() ||
+        p.projectName === proj.id
+      );
+      const actMatCost = projectPurchases.reduce((sum, p) => sum + (p.totalCost || 0), 0);
+      
+      const variance = actMatCost - estMatCost;
+      const variancePercent = estMatCost > 0 ? (variance / estMatCost) * 100 : 0;
+
+      return {
+        id: proj.id,
+        name: proj.name,
+        estimated: estMatCost,
+        actual: actMatCost,
+        variance,
+        variancePercent,
+        status: variance > (estMatCost * 0.05) ? 'Over Budget' : 'On Track'
+      };
+    }).filter(s => s.estimated > 0 || s.actual > 0);
+
+    let itemBreakdown: any[] = [];
+    const targetProject = projects.find(p => p.id === selectedVarianceProject);
+    
+    if (targetProject) {
+      const projectPurchases = purchases.filter(p => 
+        p.projectName.toLowerCase().trim() === targetProject.name.toLowerCase().trim() ||
+        p.projectName === targetProject.id
+      );
+
+      targetProject.items.forEach(estItem => {
+        const matchedPurchases = projectPurchases.filter(p => 
+          p.itemDescription.toLowerCase().includes(estItem.description.toLowerCase()) ||
+          estItem.description.toLowerCase().includes(p.itemDescription.toLowerCase())
+        );
+
+        const purchasedQty = matchedPurchases.reduce((sum, p) => sum + p.quantity, 0);
+        const purchasedTotal = matchedPurchases.reduce((sum, p) => sum + p.totalCost, 0);
+        const avgPurchasedUnit = purchasedQty > 0 ? purchasedTotal / purchasedQty : 0;
+
+        itemBreakdown.push({
+          description: estItem.description,
+          estQty: estItem.quantity,
+          estUnit: estItem.unitMaterialCost,
+          estTotal: estItem.quantity * estItem.unitMaterialCost,
+          actQty: purchasedQty,
+          actUnit: avgPurchasedUnit,
+          actTotal: purchasedTotal,
+          variance: purchasedTotal - (estItem.quantity * estItem.unitMaterialCost),
+          type: 'Match'
+        });
+      });
+
+      projectPurchases.forEach(p => {
+        const isMatched = targetProject.items.some(est => 
+            p.itemDescription.toLowerCase().includes(est.description.toLowerCase()) ||
+            est.description.toLowerCase().includes(p.itemDescription.toLowerCase())
+        );
+        if (!isMatched) {
+            itemBreakdown.push({
+                description: p.itemDescription,
+                estQty: 0,
+                estUnit: 0,
+                estTotal: 0,
+                actQty: p.quantity,
+                actUnit: p.unitCost,
+                actTotal: p.totalCost,
+                variance: p.totalCost,
+                type: 'Unplanned'
+            });
+        }
+      });
+    }
+
+    return { projectSummaries: summaries, itemVariances: itemBreakdown };
+  }, [projects, purchases, selectedVarianceProject]);
+
   // --- FILTERED DATA (By Date) ---
   const filteredData = useMemo(() => {
       const start = robustParseDate(dateRange.start).getTime();
@@ -105,10 +192,9 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
       const data = filteredData.purchases;
       const totalSpend = data.reduce((acc, p) => acc + (p.totalCost || 0), 0);
       const uniqueSuppliers = new Set(data.map(p => normalizeSupplier(p.supplier))).size;
-      const totalPOs = new Set(data.map(p => p.poNumber)).size; // Approximate count of orders
+      const totalPOs = new Set(data.map(p => p.poNumber)).size; 
       const avgOrderValue = totalPOs > 0 ? totalSpend / totalPOs : 0;
 
-      // Spend by Supplier
       const supplierSpendMap: Record<string, number> = {};
       data.forEach(p => {
           const s = normalizeSupplier(p.supplier);
@@ -119,11 +205,10 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
           .sort((a,b) => b.value - a.value)
           .slice(0, 10);
 
-      // Spend by Month
       const monthlySpendMap: Record<string, number> = {};
       data.forEach(p => {
           const date = robustParseDate(p.date);
-          const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`; // YYYY-MM
+          const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`; 
           monthlySpendMap[key] = (monthlySpendMap[key] || 0) + p.totalCost;
       });
       const monthlyTrend = Object.entries(monthlySpendMap)
@@ -135,21 +220,44 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
 
   // --- MARKET TRENDS LOGIC ---
   const processedItemsList = useMemo(() => {
-      const itemMap = new Map<string, { total: number, count: number }>();
+      const itemMap = new Map<string, { total: number, count: number, latestPrice: number, latestDate: string }>();
       
-      filteredData.purchases.forEach(p => {
+      // Sort purchases by date to find the latest price accurately
+      const sortedPurchases = [...filteredData.purchases].sort((a, b) => 
+          robustParseDate(b.date).getTime() - robustParseDate(a.date).getTime()
+      );
+
+      sortedPurchases.forEach(p => {
           const name = p.itemDescription || 'Unknown';
-          if (!itemMap.has(name)) itemMap.set(name, { total: 0, count: 0 });
+          if (!itemMap.has(name)) {
+              itemMap.set(name, { total: 0, count: 0, latestPrice: p.unitCost, latestDate: p.date });
+          }
           const curr = itemMap.get(name)!;
           curr.total += p.totalCost || 0;
           curr.count += 1;
       });
 
-      let items = Array.from(itemMap.entries()).map(([name, data]) => ({
-          name,
-          total: data.total,
-          count: data.count,
-      }));
+      let items = Array.from(itemMap.entries()).map(([name, data]) => {
+          // Find matching item in Price Database for estimate comparison
+          const dbMatch = materials?.find(m => 
+              m.name.toLowerCase() === name.toLowerCase() || 
+              name.toLowerCase().includes(m.name.toLowerCase())
+          );
+          
+          const estPrice = dbMatch?.materialCost || 0;
+          const diff = data.latestPrice - estPrice;
+          const percentChange = estPrice > 0 ? (diff / estPrice) * 100 : 0;
+
+          return {
+              name,
+              total: data.total,
+              count: data.count,
+              latestPrice: data.latestPrice,
+              estPrice: estPrice,
+              percentChange,
+              hasDbMatch: !!dbMatch
+          };
+      });
 
       if (searchTerm) {
           items = items.filter(i => i.name.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -162,9 +270,8 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
       }
 
       return items;
-  }, [filteredData.purchases, searchTerm, sortByValue]);
+  }, [filteredData.purchases, searchTerm, sortByValue, materials]);
 
-  // Simple Line Chart Data for "Older Version" feel
   const simpleTrendData = useMemo(() => {
       if (!selectedItem) return [];
       const relevant = purchases.filter(p => p.itemDescription === selectedItem);
@@ -183,7 +290,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
       const unknownItems: ShoppingItem[] = [];
 
       shoppingList.forEach(item => {
-          // Find historical prices for this item
           const history = purchases.filter(p => p.itemDescription.toLowerCase().includes(item.name.toLowerCase()));
           
           if (history.length === 0) {
@@ -191,7 +297,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
               return;
           }
 
-          // Filter out blocked suppliers
           const validHistory = history.filter(p => {
               const supName = normalizeSupplier(p.supplier);
               const status = supplierStatuses.find(s => s.name === supName);
@@ -199,12 +304,10 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
           });
 
           if (validHistory.length === 0) {
-              // All known suppliers are blocked
               unknownItems.push(item);
               return;
           }
 
-          // Find lowest recent price (simple logic: lowest price in history from valid suppliers)
           validHistory.sort((a, b) => a.unitCost - b.unitCost);
           const bestOption = validHistory[0];
           const bestSupplier = normalizeSupplier(bestOption.supplier);
@@ -242,7 +345,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
               const worksheet = workbook.Sheets[sheetName];
               const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
-              // Expected format: Column 'Item' and 'Quantity'
               const newItems: ShoppingItem[] = [];
               jsonData.forEach((row: any) => {
                   const name = row['Item'] || row['Name'] || row['Description'] || row['Material'];
@@ -269,7 +371,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
           }
       };
       reader.readAsArrayBuffer(file);
-      e.target.value = ''; // Reset input
+      e.target.value = ''; 
   };
 
   const showNotification = (type: 'success' | 'error', message: string) => {
@@ -277,7 +379,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
       setTimeout(() => setNotification(null), 5000);
   };
 
-  // --- QB Handlers ---
   const handleOpenQbSettings = () => {
       setQbUrl(getZapierWebhookUrl());
       setShowQbSettings(true);
@@ -378,7 +479,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
           </div>
       )}
 
-      {/* MODAL FOR QB SETTINGS */}
       {showQbSettings && (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
               <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
@@ -414,31 +514,33 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
         <div className="bg-slate-100 p-1 rounded-lg flex overflow-x-auto max-w-full">
             <button onClick={() => setActiveTab('dashboard')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'dashboard' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><LayoutDashboard className="w-4 h-4" /> Dashboard</button>
             <button onClick={() => setActiveTab('analysis')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'analysis' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><TrendingUp className="w-4 h-4" /> Market Trends</button>
+            <button onClick={() => setActiveTab('variance')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'variance' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><ArrowRightLeft className="w-4 h-4" /> Budget Variance</button>
             <button onClick={() => setActiveTab('procurement')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'procurement' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><ShoppingCart className="w-4 h-4" /> Smart Buy</button>
             <button onClick={() => setActiveTab('entry')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'entry' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><Database className="w-4 h-4" /> Data Entry</button>
         </div>
       </div>
 
-      <div className="bg-white p-3 rounded-xl border border-slate-200 flex items-center gap-4 shadow-sm w-fit">
-          <Calendar className="w-4 h-4 text-slate-400" />
-          <input 
-              type="date" 
-              value={dateRange.start}
-              onChange={(e) => setDateRange({...dateRange, start: e.target.value})}
-              className="text-sm font-bold text-slate-700 outline-none"
-          />
-          <span className="text-slate-300">-</span>
-          <input 
-              type="date" 
-              value={dateRange.end}
-              onChange={(e) => setDateRange({...dateRange, end: e.target.value})}
-              className="text-sm font-bold text-slate-700 outline-none"
-          />
-      </div>
+      {activeTab !== 'variance' && (
+        <div className="bg-white p-3 rounded-xl border border-slate-200 flex items-center gap-4 shadow-sm w-fit">
+            <Calendar className="w-4 h-4 text-slate-400" />
+            <input 
+                type="date" 
+                value={dateRange.start}
+                onChange={(e) => setDateRange({...dateRange, start: e.target.value})}
+                className="text-sm font-bold text-slate-700 outline-none"
+            />
+            <span className="text-slate-300">-</span>
+            <input 
+                type="date" 
+                value={dateRange.end}
+                onChange={(e) => setDateRange({...dateRange, end: e.target.value})}
+                className="text-sm font-bold text-slate-700 outline-none"
+            />
+        </div>
+      )}
 
       {activeTab === 'dashboard' && (
           <div className="space-y-6">
-              {/* Procurement KPIs */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                       <p className="text-xs font-bold text-slate-400 uppercase mb-1">Total Spend</p>
@@ -459,7 +561,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Monthly Spend Trend */}
                   <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-80">
                       <h3 className="font-bold text-slate-800 mb-6">Monthly Spend Trend</h3>
                       <ResponsiveContainer width="100%" height="85%">
@@ -479,7 +580,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                       </ResponsiveContainer>
                   </div>
 
-                  {/* Spend by Supplier */}
                   <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-80">
                       <h3 className="font-bold text-slate-800 mb-6">Top Suppliers by Spend</h3>
                       <ResponsiveContainer width="100%" height="85%">
@@ -494,7 +594,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                   </div>
               </div>
 
-              {/* Recent Transactions List */}
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                   <div className="p-4 border-b border-slate-200 bg-slate-50">
                       <h3 className="font-bold text-slate-800">Recent Transactions</h3>
@@ -527,22 +626,156 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
           </div>
       )}
 
+      {activeTab === 'variance' && (
+        <div className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[600px]">
+                    <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+                        <h3 className="font-bold text-slate-800">Project Budgets</h3>
+                        <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">Est vs Act</span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto custom-scrollbar">
+                        {varianceData.projectSummaries.map(s => (
+                            <div 
+                                key={s.id}
+                                onClick={() => setSelectedVarianceProject(s.id)}
+                                className={`p-4 border-b border-slate-50 cursor-pointer transition-colors hover:bg-blue-50 ${selectedVarianceProject === s.id ? 'bg-blue-50 border-blue-200' : ''}`}
+                            >
+                                <div className="flex justify-between items-start mb-1">
+                                    <p className="font-bold text-sm text-slate-900 truncate flex-1 pr-2">{s.name}</p>
+                                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${s.variance > 0 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                                        {s.variance > 0 ? '+' : ''}{s.variancePercent.toFixed(1)}%
+                                    </span>
+                                </div>
+                                <div className="flex justify-between text-xs text-slate-500">
+                                    <span>Est: ${s.estimated.toLocaleString()}</span>
+                                    <span className="font-medium text-slate-700">Act: ${s.actual.toLocaleString()}</span>
+                                </div>
+                                <div className="w-full bg-slate-100 h-1.5 rounded-full mt-3 overflow-hidden">
+                                    <div 
+                                        className={`h-full rounded-full ${s.variance > 0 ? 'bg-red-500' : 'bg-emerald-500'}`} 
+                                        style={{ width: `${Math.min(100, (s.actual / s.estimated) * 100)}%` }}
+                                    ></div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="lg:col-span-3 flex flex-col gap-6">
+                    {selectedVarianceProject !== 'All' && projects?.find(p => p.id === selectedVarianceProject) ? (
+                        <>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                                        <FileText className="w-3 h-3"/> Original Estimate (Mat)
+                                    </p>
+                                    <p className="text-xl font-bold text-slate-900 mt-1">
+                                        ${varianceData.projectSummaries.find(s => s.id === selectedVarianceProject)?.estimated.toLocaleString()}
+                                    </p>
+                                </div>
+                                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                                        <ShoppingCart className="w-3 h-3"/> Total Actual Purchases
+                                    </p>
+                                    <p className="text-xl font-bold text-slate-900 mt-1">
+                                        ${varianceData.projectSummaries.find(s => s.id === selectedVarianceProject)?.actual.toLocaleString()}
+                                    </p>
+                                </div>
+                                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                                        <Percent className="w-3 h-3"/> Net Material Variance
+                                    </p>
+                                    <p className={`text-xl font-bold mt-1 ${varianceData.projectSummaries.find(s => s.id === selectedVarianceProject)!.variance > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                                        ${Math.abs(varianceData.projectSummaries.find(s => s.id === selectedVarianceProject)!.variance).toLocaleString()}
+                                        <span className="text-xs ml-1 font-medium">({varianceData.projectSummaries.find(s => s.id === selectedVarianceProject)!.variance > 0 ? 'OVER' : 'UNDER'})</span>
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex-1">
+                                <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+                                    <h3 className="font-bold text-slate-800">Itemized Material Variance</h3>
+                                    <div className="flex gap-2">
+                                        <span className="flex items-center gap-1 text-[10px] font-bold text-slate-400"><div className="w-2 h-2 rounded-full bg-blue-100 border border-blue-200"></div> ESTIMATED</span>
+                                        <span className="flex items-center gap-1 text-[10px] font-bold text-slate-400"><div className="w-2 h-2 rounded-full bg-emerald-100 border border-emerald-200"></div> ACTUAL</span>
+                                    </div>
+                                </div>
+                                <div className="overflow-x-auto max-h-[450px] custom-scrollbar">
+                                    <table className="w-full text-sm text-left">
+                                        <thead className="bg-white text-slate-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-100 sticky top-0 z-10">
+                                            <tr>
+                                                <th className="px-6 py-3">Description</th>
+                                                <th className="px-4 py-3 text-center">Qty (Est/Act)</th>
+                                                <th className="px-4 py-3 text-right">Unit Price (Est/Act)</th>
+                                                <th className="px-6 py-3 text-right">Cost Variance</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {varianceData.itemVariances.map((item, i) => (
+                                                <tr key={i} className="hover:bg-slate-50 group">
+                                                    <td className="px-6 py-4">
+                                                        <div className="font-bold text-slate-900 text-xs">{item.description}</div>
+                                                        {item.type === 'Unplanned' && (
+                                                            <span className="text-[9px] font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded uppercase mt-1 inline-block">Unplanned Purchase</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-4 text-center">
+                                                        <div className="flex items-center justify-center gap-2">
+                                                            <span className="text-blue-600 font-medium">{item.estQty}</span>
+                                                            <ArrowRightLeft className="w-3 h-3 text-slate-300" />
+                                                            <span className="text-emerald-600 font-medium">{item.actQty}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-4 py-4 text-right">
+                                                        <div className="text-[10px] text-blue-500 font-medium">${item.estUnit.toFixed(2)}</div>
+                                                        <div className="text-xs text-emerald-600 font-bold mt-0.5">${item.actUnit.toFixed(2)}</div>
+                                                    </td>
+                                                    <td className={`px-6 py-4 text-right font-bold tabular-nums ${item.variance > 0 ? 'text-red-600' : item.variance < 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                                                        {item.variance === 0 ? '-' : `$${item.variance.toLocaleString()}`}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl flex-1 flex flex-col items-center justify-center p-12 text-center">
+                            <div className="p-4 bg-white rounded-full shadow-sm mb-4">
+                                <ArrowRightLeft className="w-12 h-12 text-blue-300" />
+                            </div>
+                            <h3 className="font-bold text-slate-800 text-lg">Analyze Budget Variance</h3>
+                            <p className="text-slate-500 max-w-md mt-2">
+                                Select a project from the left to compare the material items used in the estimate against actual invoices processed.
+                            </p>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+      )}
+
       {activeTab === 'analysis' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[600px]">
-              {/* Item List */}
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
-                  <div className="p-4 border-b border-slate-200">
-                      <div className="relative">
+                  <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
+                      <div className="relative flex-1">
                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                           <input 
-                              placeholder="Search item history..." 
-                              className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm outline-none"
+                              placeholder="Search item trends..." 
+                              className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm outline-none bg-white"
                               value={searchTerm}
                               onChange={(e) => setSearchTerm(e.target.value)}
                           />
                       </div>
                   </div>
                   <div className="flex-1 overflow-y-auto">
+                      <div className="px-4 py-2 bg-slate-100 border-b border-slate-200 flex justify-between items-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                          <span>Material Item</span>
+                          <span>Est vs Act (% Var)</span>
+                      </div>
                       {processedItemsList.map(item => (
                           <div 
                               key={item.name} 
@@ -554,14 +787,22 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                                   <p className="text-xs text-slate-400">{item.count} purchases</p>
                               </div>
                               <div className="text-right">
-                                  <p className="font-bold text-xs text-emerald-600">${item.total.toLocaleString()}</p>
+                                  <div className="flex items-center justify-end gap-1.5">
+                                      <p className="font-bold text-xs text-slate-900">${item.latestPrice.toFixed(2)}</p>
+                                      {item.hasDbMatch && (
+                                          <div className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${item.percentChange > 0 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                                              {item.percentChange > 0 ? <ArrowUpRight className="w-2.5 h-2.5"/> : <ArrowDownRight className="w-2.5 h-2.5"/>}
+                                              {Math.abs(item.percentChange).toFixed(1)}%
+                                          </div>
+                                      )}
+                                  </div>
+                                  {item.hasDbMatch && <p className="text-[10px] text-slate-400">Est: ${item.estPrice.toFixed(2)}</p>}
                               </div>
                           </div>
                       ))}
                   </div>
               </div>
 
-              {/* Chart Area */}
               <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col">
                   {selectedItem ? (
                       <>
@@ -570,6 +811,12 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                                   <h3 className="font-bold text-xl text-slate-900">{selectedItem}</h3>
                                   <p className="text-sm text-slate-500">Price Trend (Unit Cost)</p>
                               </div>
+                              {processedItemsList.find(i => i.name === selectedItem)?.hasDbMatch && (
+                                  <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-2 text-right">
+                                      <p className="text-[10px] font-bold text-blue-500 uppercase">Database Price (Estimate)</p>
+                                      <p className="text-lg font-bold text-blue-700">${processedItemsList.find(i => i.name === selectedItem)?.estPrice.toFixed(2)}</p>
+                                  </div>
+                              )}
                           </div>
                           
                           <div className="flex-1 min-h-[300px]">
@@ -582,7 +829,10 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                                           contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
                                           formatter={(val: number) => [`$${val.toFixed(2)}`, 'Unit Cost']}
                                       />
-                                      <Line type="monotone" dataKey="price" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6 }} />
+                                      {processedItemsList.find(i => i.name === selectedItem)?.hasDbMatch && (
+                                          <Legend verticalAlign="top" height={36}/>
+                                      )}
+                                      <Line type="monotone" dataKey="price" name="Actual Purchase" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6 }} />
                                   </LineChart>
                               </ResponsiveContainer>
                           </div>
@@ -610,11 +860,8 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
 
       {activeTab === 'procurement' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Shopping List Section */}
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col h-full">
                   <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><ShoppingCart className="w-5 h-5"/> Shopping List</h3>
-                  
-                  {/* File Upload Button */}
                   <div className="mb-4">
                       <button 
                           onClick={() => shoppingListInputRef.current?.click()}
@@ -629,7 +876,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                           accept=".xlsx,.xls,.csv"
                           onChange={handleUploadShoppingList}
                       />
-                      <p className="text-[10px] text-center text-slate-400 mt-1">Columns needed: Item, Quantity</p>
                   </div>
 
                   <div className="flex gap-2 mb-4">
@@ -659,13 +905,8 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                       ))}
                       {shoppingList.length === 0 && <p className="text-center text-slate-400 text-xs py-8">List is empty.</p>}
                   </div>
-                  
-                  {shoppingList.length > 0 && (
-                      <button onClick={() => setShoppingList([])} className="mt-4 text-xs text-red-500 font-bold hover:underline self-center">Clear List</button>
-                  )}
               </div>
 
-              {/* Optimization Results */}
               <div className="lg:col-span-2 space-y-6">
                   {Object.entries(optimizedProcurement.plan).map(([supplier, rawData]) => {
                       const data = rawData as { items: ShoppingItem[], totalEst: number };
@@ -697,51 +938,15 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                           </button>
                       </div>
                   )})}
-                  
-                  {optimizedProcurement.unknownItems.length > 0 && (
-                      <div className="bg-orange-50 rounded-xl border border-orange-200 p-6">
-                          <h3 className="font-bold text-orange-800 mb-2 flex items-center gap-2"><AlertTriangle className="w-5 h-5"/> No Price History</h3>
-                          <p className="text-xs text-orange-700 mb-4">We couldn't find recent prices for these items from your allowed suppliers.</p>
-                          <ul className="list-disc list-inside text-sm text-orange-800 space-y-1">
-                              {optimizedProcurement.unknownItems.map(i => <li key={i.id}>{i.name}</li>)}
-                          </ul>
-                      </div>
-                  )}
-                  
-                  {Object.keys(optimizedProcurement.plan).length === 0 && optimizedProcurement.unknownItems.length === 0 && (
-                      <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl p-12 text-center h-full flex flex-col items-center justify-center">
-                          <ShoppingCart className="w-12 h-12 text-slate-300 mb-3" />
-                          <p className="text-slate-500 font-medium">Add items to generate a smart buying plan.</p>
-                          <p className="text-slate-400 text-sm mt-1">We'll find the best suppliers based on your history.</p>
-                      </div>
-                  )}
-
-                  {/* Supplier Blocking */}
-                  <div className="mt-6 pt-6 border-t border-slate-200">
-                      <h4 className="font-bold text-slate-800 mb-3 text-xs uppercase">Supplier Management</h4>
-                      <div className="flex flex-wrap gap-2">
-                          {supplierStatuses.map(s => (
-                              <button 
-                                  key={s.name}
-                                  onClick={() => toggleSupplierBlock(s.name)}
-                                  className={`text-xs px-3 py-1.5 rounded-full border flex items-center gap-1 transition-all ${s.isBlocked ? 'bg-red-50 border-red-200 text-red-600 line-through' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300'}`}
-                              >
-                                  {s.name}
-                              </button>
-                          ))}
-                      </div>
-                  </div>
               </div>
           </div>
       )}
       
       {activeTab === 'entry' && (
           <div className="space-y-6">
-              {/* QuickBooks Integration Banner */}
               <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex flex-col md:flex-row justify-between items-center gap-4">
                   <div className="flex items-center gap-3">
                       <div className="bg-white p-2 rounded-lg shadow-sm">
-                          {/* QB Logo / Placeholder */}
                           <span className="text-xl font-bold text-emerald-600">qb</span>
                       </div>
                       <div>
@@ -809,50 +1014,10 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                       </div>
                   </div>
               </div>
-
-              {scannedRecords.length > 0 && (
-                  <div className="bg-white p-6 rounded-xl shadow-sm border border-blue-200 animate-in slide-in-from-top-4">
-                      <div className="flex justify-between items-center mb-4">
-                          <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2">
-                             <CheckCircle className="w-5 h-5 text-emerald-500" /> Review Scanned Items
-                          </h3>
-                          <div className="flex gap-2">
-                              <button onClick={() => setScannedRecords([])} className="px-4 py-2 text-slate-500 text-sm font-bold hover:bg-slate-100 rounded-lg">Discard</button>
-                              <button onClick={() => {
-                                  if(setPurchases) {
-                                      setPurchases(prev => [...prev, ...scannedRecords]);
-                                      setScannedRecords([]);
-                                      showNotification('success', 'Records saved.');
-                                  }
-                              }} className="px-6 py-2 bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 rounded-lg shadow-sm flex items-center gap-2">
-                                  <CheckCircle className="w-4 h-4" /> Save to Database
-                              </button>
-                          </div>
-                      </div>
-                      <div className="overflow-x-auto border border-slate-200 rounded-lg">
-                          <table className="w-full text-sm text-left">
-                              <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-xs">
-                                  <tr><th className="px-4 py-2">Item</th><th className="px-4 py-2">Supplier</th><th className="px-4 py-2 text-right">Qty</th><th className="px-4 py-2 text-right">Unit</th><th className="px-4 py-2 text-right">Total</th></tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-100">
-                                  {scannedRecords.map((rec, i) => (
-                                      <tr key={i} className="hover:bg-slate-50">
-                                          <td className="px-4 py-2 font-medium">{rec.itemDescription}</td>
-                                          <td className="px-4 py-2 text-slate-600">{rec.supplier}</td>
-                                          <td className="px-4 py-2 text-right">{rec.quantity}</td>
-                                          <td className="px-4 py-2 text-right">${rec.unitCost.toFixed(2)}</td>
-                                          <td className="px-4 py-2 text-right font-bold">${rec.totalCost.toFixed(2)}</td>
-                                      </tr>
-                                  ))}
-                              </tbody>
-                          </table>
-                      </div>
-                  </div>
-              )}
           </div>
       )}
       
-      {activeTab !== 'entry' && activeTab !== 'analysis' && activeTab !== 'dashboard' && activeTab !== 'procurement' && <div>Tab Not Found</div>}
+      {activeTab !== 'entry' && activeTab !== 'analysis' && activeTab !== 'dashboard' && activeTab !== 'procurement' && activeTab !== 'variance' && <div>Tab Not Found</div>}
     </div>
   );
 };
