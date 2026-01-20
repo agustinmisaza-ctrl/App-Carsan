@@ -186,6 +186,41 @@ export const analyzeBlueprint = async (
   }
 };
 
+/**
+ * Uses Google Search grounding to find live prices for an electrical material.
+ */
+export const fetchLiveWebPrices = async (itemName: string): Promise<{ text: string, sources: { uri: string, title: string }[] }> => {
+  if (!process.env.API_KEY) throw new Error("API Key not found");
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+  const prompt = `Find the current price for "${itemName}" from electrical suppliers like City Electric Supply (CES), World Electric, or Home Depot in the Miami/Florida area. Provide a clear summary of the latest price per unit and provide direct links to the products if found. Focus on professional contractor pricing if available.`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: prompt,
+      config: {
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks
+      ?.filter((chunk: any) => chunk.web)
+      ?.map((chunk: any) => ({
+        uri: chunk.web.uri,
+        title: chunk.web.title
+      })) || [];
+
+    return {
+      text: response.text || "No live pricing information found.",
+      sources
+    };
+  } catch (error) {
+    console.error("Live Price Fetch Error:", error);
+    throw new Error("Failed to search live prices. Please check your internet connection.");
+  }
+};
+
 export const analyzeSchedule = async (base64File: string): Promise<string> => {
     if (!process.env.API_KEY) throw new Error("API Key not found");
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });

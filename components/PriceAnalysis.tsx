@@ -2,12 +2,13 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { PurchaseRecord, MaterialItem, ProjectEstimate, ServiceTicket, SupplierStatus, ShoppingItem, VarianceItem } from '../types';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area, Cell, PieChart, Pie } from 'recharts';
-import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, Sparkles, AlertTriangle, Trash2, Plus, ShoppingCart, RefreshCw, Calendar, Download, Settings, FileText, ArrowRightLeft, Percent, ArrowUpRight, ArrowDownRight } from 'lucide-react';
-import { extractInvoiceData } from '../services/geminiService';
+import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, Sparkles, AlertTriangle, Trash2, Plus, ShoppingCart, RefreshCw, Calendar, Download, Settings, FileText, ArrowRightLeft, Percent, ArrowUpRight, ArrowDownRight, Globe, ExternalLink, Cloud, Link as LinkIcon, Save } from 'lucide-react';
+import { extractInvoiceData, fetchLiveWebPrices } from '../services/geminiService';
 import * as XLSX from 'xlsx';
 import { parseCurrency, normalizeSupplier, robustParseDate } from '../utils/purchaseData';
 import { MIAMI_STANDARD_PRICES } from '../utils/miamiStandards';
 import { fetchQuickBooksBills, getZapierWebhookUrl, setZapierWebhookUrl } from '../services/quickbooksService';
+import { searchSharePointSites, getSiteDrive, searchExcelFiles, downloadFileContent, SPSite, SPDriveItem } from '../services/sharepointService';
 
 interface PriceAnalysisProps {
   purchases: PurchaseRecord[];
@@ -24,6 +25,10 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
   const [searchTerm, setSearchTerm] = useState('');
   const [sortByValue, setSortByValue] = useState(true);
   
+  // Live Price State
+  const [isSearchingLive, setIsSearchingLive] = useState(false);
+  const [livePriceResult, setLivePriceResult] = useState<{ text: string, sources: { uri: string, title: string }[] } | null>(null);
+
   // Variance State
   const [selectedVarianceProject, setSelectedVarianceProject] = useState<string>('All');
   
@@ -56,6 +61,18 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
   const [showQbSettings, setShowQbSettings] = useState(false);
   const [qbUrl, setQbUrl] = useState('');
   const [isSyncingQb, setIsSyncingQb] = useState(false);
+
+  // SharePoint File Import State
+  const [showSpImport, setShowSpImport] = useState(false);
+  const [spSites, setSpSites] = useState<SPSite[]>([]);
+  const [spFiles, setSpFiles] = useState<SPDriveItem[]>([]);
+  const [selectedSpSite, setSelectedSpSite] = useState<SPSite | null>(null);
+  const [isLoadingSp, setIsLoadingSp] = useState(false);
+  // Stored preferences for auto-sync
+  const [savedSpConfig, setSavedSpConfig] = useState<{driveId: string, itemId: string, fileName: string} | null>(() => {
+      const saved = localStorage.getItem('carsan_price_file_config');
+      return saved ? JSON.parse(saved) : null;
+  });
 
   // Procurement State
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>([]);
@@ -284,6 +301,124 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
       }));
   }, [selectedItem, purchases]);
 
+  // --- LIVE PRICE SEARCH HANDLER ---
+  const handleLivePriceSearch = async () => {
+    if (!selectedItem) return;
+    setIsSearchingLive(true);
+    setLivePriceResult(null);
+    try {
+        const result = await fetchLiveWebPrices(selectedItem);
+        setLivePriceResult(result);
+        showNotification('success', 'Found live market pricing.');
+    } catch (e: any) {
+        showNotification('error', e.message);
+    } finally {
+        setIsSearchingLive(false);
+    }
+  };
+
+  // --- SHAREPOINT FILE HANDLERS ---
+  const handleSearchSpSites = async () => {
+      setIsLoadingSp(true);
+      try {
+          // Default search for Carsan sites to help user
+          const results = await searchSharePointSites("Carsan");
+          setSpSites(results);
+          if(results.length === 0) {
+              // Fallback to all accessible sites
+              const allSites = await searchSharePointSites("");
+              setSpSites(allSites);
+          }
+      } catch (e: any) {
+          showNotification('error', "Could not search sites. Ensure you are signed in.");
+      } finally {
+          setIsLoadingSp(false);
+      }
+  };
+
+  const handleSelectSpSite = async (site: SPSite) => {
+      setSelectedSpSite(site);
+      setIsLoadingSp(true);
+      try {
+          const driveId = await getSiteDrive(site.id);
+          // Look for excel files
+          const files = await searchExcelFiles(driveId, ""); // Empty query lists relevant files or searches for xlsx
+          setSpFiles(files.map(f => ({...f, parentDriveId: driveId} as any)));
+      } catch (e) {
+          showNotification('error', "Could not access files in this site.");
+      } finally {
+          setIsLoadingSp(false);
+      }
+  };
+
+  const processExcelBuffer = (buffer: ArrayBuffer) => {
+      try {
+          const workbook = XLSX.read(buffer, { type: 'array' });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+          const newRecords = jsonData.map((row: any, idx) => ({
+              id: `sp-${Date.now()}-${idx}`,
+              date: robustParseDate(row['Date'] || row['Fecha']).toISOString(),
+              poNumber: String(row['Purchase Order #'] || row['PO'] || ''),
+              brand: String(row['Brand'] || 'N/A'),
+              itemDescription: String(row['Item'] || row['Description'] || ''),
+              quantity: Number(row['Quantity'] || row['Qty'] || 0),
+              unitCost: parseCurrency(String(row['Unit Cost'] || row['Price'] || 0)),
+              totalCost: parseCurrency(String(row['Total'] || 0)),
+              supplier: normalizeSupplier(String(row['Supplier'] || row['Vendor'] || '')),
+              projectName: String(row['Project'] || 'Inventory'),
+              type: 'Material'
+          })).filter(r => r.itemDescription && r.totalCost > 0);
+
+          if (setPurchases) {
+              setPurchases(prev => {
+                  // Basic dup check by comparing content hash or just ID if stable
+                  // Here we just append for simplicity, in real app consider upsert
+                  return [...prev, ...newRecords];
+              });
+              showNotification('success', `Successfully imported ${newRecords.length} items from SharePoint.`);
+          }
+      } catch (e) {
+          showNotification('error', "Failed to parse Excel file.");
+      }
+  };
+
+  const handleSelectSpFile = async (file: SPDriveItem & { parentDriveId: string }) => {
+      setIsLoadingSp(true);
+      try {
+          const buffer = await downloadFileContent(file.parentDriveId, file.id);
+          processExcelBuffer(buffer);
+          
+          // Save config for future one-click sync
+          const config = { driveId: file.parentDriveId, itemId: file.id, fileName: file.name };
+          setSavedSpConfig(config);
+          localStorage.setItem('carsan_price_file_config', JSON.stringify(config));
+          
+          setShowSpImport(false);
+      } catch (e) {
+          showNotification('error', "Failed to download file content.");
+      } finally {
+          setIsLoadingSp(false);
+      }
+  };
+
+  const handleQuickSync = async () => {
+      if (!savedSpConfig) return;
+      setIsSyncingQb(true); // Reuse loading spinner
+      try {
+          const buffer = await downloadFileContent(savedSpConfig.driveId, savedSpConfig.itemId);
+          processExcelBuffer(buffer);
+      } catch (e) {
+          showNotification('error', "Quick sync failed. File might have moved. Please re-select.");
+          setSavedSpConfig(null);
+          localStorage.removeItem('carsan_price_file_config');
+      } finally {
+          setIsSyncingQb(false);
+      }
+  };
+
   // --- SMART PROCUREMENT LOGIC ---
   const optimizedProcurement = useMemo(() => {
       const plan: Record<string, { items: ShoppingItem[], totalEst: number }> = {};
@@ -476,6 +611,81 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
           <div className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-50 px-6 py-3 rounded-full shadow-lg flex items-center gap-2 animate-in slide-in-from-top-2 ${notification.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'} text-white`}>
               <CheckCircle className="w-4 h-4" />
               <span className="font-medium text-sm">{notification.message}</span>
+          </div>
+      )}
+
+      {/* SHAREPOINT MODAL */}
+      {showSpImport && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[80vh]">
+                  <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                      <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                          <Cloud className="w-5 h-5 text-blue-600" /> Import from SharePoint
+                      </h3>
+                      <button onClick={() => setShowSpImport(false)}><X className="w-5 h-5 text-slate-400" /></button>
+                  </div>
+                  
+                  <div className="flex-1 overflow-y-auto p-4">
+                      {!selectedSpSite ? (
+                          <div className="space-y-4">
+                              <p className="text-sm text-slate-600">Select the SharePoint site containing your price list:</p>
+                              {spSites.length === 0 ? (
+                                  <div className="text-center py-8">
+                                      <button 
+                                          onClick={handleSearchSpSites}
+                                          disabled={isLoadingSp}
+                                          className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 mx-auto disabled:opacity-70"
+                                      >
+                                          {isLoadingSp ? <Loader2 className="w-4 h-4 animate-spin"/> : <Search className="w-4 h-4"/>}
+                                          Search "Carsan" Sites
+                                      </button>
+                                  </div>
+                              ) : (
+                                  <div className="space-y-2">
+                                      {spSites.map(site => (
+                                          <button 
+                                              key={site.id}
+                                              onClick={() => handleSelectSpSite(site)}
+                                              className="w-full text-left p-3 rounded-lg border border-slate-200 hover:bg-blue-50 transition-colors flex justify-between items-center group"
+                                          >
+                                              <span className="font-bold text-slate-700 text-sm">{site.displayName}</span>
+                                              <ArrowRightLeft className="w-4 h-4 text-slate-300 group-hover:text-blue-500" />
+                                          </button>
+                                      ))}
+                                  </div>
+                              )}
+                          </div>
+                      ) : (
+                          <div className="space-y-4">
+                              <button onClick={() => { setSelectedSpSite(null); setSpFiles([]); }} className="text-xs text-blue-600 hover:underline mb-2">Back to Sites</button>
+                              <h4 className="font-bold text-slate-800 text-sm">Files in "{selectedSpSite.displayName}"</h4>
+                              {isLoadingSp ? (
+                                  <div className="flex justify-center py-8"><Loader2 className="w-8 h-8 text-blue-500 animate-spin" /></div>
+                              ) : (
+                                  <div className="space-y-2">
+                                      {spFiles.length === 0 ? (
+                                          <p className="text-center text-slate-400 text-sm py-4">No Excel files found in default drive.</p>
+                                      ) : (
+                                          spFiles.map(file => (
+                                              <button 
+                                                  key={file.id}
+                                                  onClick={() => handleSelectSpFile(file as any)}
+                                                  className="w-full text-left p-3 rounded-lg border border-slate-200 hover:bg-emerald-50 transition-colors flex items-center gap-3"
+                                              >
+                                                  <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+                                                  <div className="flex-1 overflow-hidden">
+                                                      <p className="font-bold text-slate-700 text-sm truncate">{file.name}</p>
+                                                      <p className="text-[10px] text-slate-400">Last mod: {new Date(file.lastModifiedDateTime).toLocaleDateString()}</p>
+                                                  </div>
+                                              </button>
+                                          ))
+                                      )}
+                                  </div>
+                              )}
+                          </div>
+                      )}
+                  </div>
+              </div>
           </div>
       )}
 
@@ -758,7 +968,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
       )}
 
       {activeTab === 'analysis' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[600px]">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[700px]">
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
                   <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
                       <div className="relative flex-1">
@@ -779,7 +989,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                       {processedItemsList.map(item => (
                           <div 
                               key={item.name} 
-                              onClick={() => setSelectedItem(item.name)}
+                              onClick={() => { setSelectedItem(item.name); setLivePriceResult(null); }}
                               className={`p-3 border-b border-slate-50 cursor-pointer hover:bg-blue-50 transition flex justify-between items-center ${selectedItem === item.name ? 'bg-blue-50 border-blue-200' : ''}`}
                           >
                               <div className="truncate pr-4 flex-1">
@@ -803,23 +1013,64 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                   </div>
               </div>
 
-              <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col">
+              <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col overflow-y-auto custom-scrollbar">
                   {selectedItem ? (
-                      <>
-                          <div className="flex justify-between items-start mb-6">
+                      <div className="space-y-6">
+                          <div className="flex justify-between items-start">
                               <div>
                                   <h3 className="font-bold text-xl text-slate-900">{selectedItem}</h3>
                                   <p className="text-sm text-slate-500">Price Trend (Unit Cost)</p>
                               </div>
-                              {processedItemsList.find(i => i.name === selectedItem)?.hasDbMatch && (
-                                  <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-2 text-right">
-                                      <p className="text-[10px] font-bold text-blue-500 uppercase">Database Price (Estimate)</p>
-                                      <p className="text-lg font-bold text-blue-700">${processedItemsList.find(i => i.name === selectedItem)?.estPrice.toFixed(2)}</p>
-                                  </div>
-                              )}
+                              <div className="flex gap-2">
+                                  <button 
+                                      onClick={handleLivePriceSearch}
+                                      disabled={isSearchingLive}
+                                      className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 shadow-md disabled:opacity-50"
+                                  >
+                                      {isSearchingLive ? <Loader2 className="w-4 h-4 animate-spin"/> : <Globe className="w-4 h-4" />}
+                                      Live Market Lookup
+                                  </button>
+                                  {processedItemsList.find(i => i.name === selectedItem)?.hasDbMatch && (
+                                      <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-2 text-right">
+                                          <p className="text-[10px] font-bold text-blue-500 uppercase">Database Price</p>
+                                          <p className="text-lg font-bold text-blue-700">${processedItemsList.find(i => i.name === selectedItem)?.estPrice.toFixed(2)}</p>
+                                      </div>
+                                  )}
+                              </div>
                           </div>
+
+                          {livePriceResult && (
+                              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-6 animate-in fade-in slide-in-from-top-4 duration-300">
+                                  <h4 className="font-bold text-emerald-900 flex items-center gap-2 mb-3">
+                                      <Sparkles className="w-5 h-5 text-emerald-600" />
+                                      Live Web Pricing Analysis
+                                  </h4>
+                                  <p className="text-sm text-emerald-800 leading-relaxed whitespace-pre-wrap mb-4">
+                                      {livePriceResult.text}
+                                  </p>
+                                  {livePriceResult.sources.length > 0 && (
+                                      <div className="border-t border-emerald-200 pt-3">
+                                          <p className="text-[10px] font-bold text-emerald-600 uppercase mb-2">Sources Found:</p>
+                                          <div className="flex flex-wrap gap-2">
+                                              {livePriceResult.sources.map((src, idx) => (
+                                                  <a 
+                                                      key={idx}
+                                                      href={src.uri}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="flex items-center gap-1.5 bg-white border border-emerald-200 px-2 py-1 rounded text-[10px] font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
+                                                  >
+                                                      <ExternalLink className="w-3 h-3" />
+                                                      {src.title}
+                                                  </a>
+                                              ))}
+                                          </div>
+                                      </div>
+                                  )}
+                              </div>
+                          )}
                           
-                          <div className="flex-1 min-h-[300px]">
+                          <div className="h-[300px]">
                               <ResponsiveContainer width="100%" height="100%">
                                   <LineChart data={simpleTrendData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
                                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -837,7 +1088,7 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                               </ResponsiveContainer>
                           </div>
 
-                          <div className="mt-6 bg-slate-50 p-4 rounded-lg border border-slate-100">
+                          <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
                               <h4 className="font-bold text-sm text-slate-800 mb-2">Purchase History</h4>
                               <div className="flex flex-wrap gap-2">
                                   {simpleTrendData.slice(-5).reverse().map((pt, i) => (
@@ -847,101 +1098,17 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                                   ))}
                               </div>
                           </div>
-                      </>
+                      </div>
                   ) : (
-                      <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
+                      <div className="flex-1 flex flex-col items-center justify-center text-slate-400 py-20">
                           <TrendingUp className="w-16 h-16 mb-4 opacity-20" />
-                          <p>Select an item to view price trends.</p>
+                          <p>Select an item to view price trends and search live market data.</p>
                       </div>
                   )}
               </div>
           </div>
       )}
 
-      {activeTab === 'procurement' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col h-full">
-                  <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><ShoppingCart className="w-5 h-5"/> Shopping List</h3>
-                  <div className="mb-4">
-                      <button 
-                          onClick={() => shoppingListInputRef.current?.click()}
-                          className="w-full border-2 border-dashed border-blue-200 bg-blue-50 text-blue-700 py-3 rounded-xl font-bold text-sm hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"
-                      >
-                          <FileSpreadsheet className="w-4 h-4" /> Upload Excel List
-                      </button>
-                      <input 
-                          type="file" 
-                          ref={shoppingListInputRef}
-                          className="hidden"
-                          accept=".xlsx,.xls,.csv"
-                          onChange={handleUploadShoppingList}
-                      />
-                  </div>
-
-                  <div className="flex gap-2 mb-4">
-                      <input 
-                          className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none"
-                          placeholder="Or add manually..."
-                          value={newItemName}
-                          onChange={(e) => setNewItemName(e.target.value)}
-                      />
-                      <input 
-                          type="number" 
-                          className="w-16 border border-slate-300 rounded-lg px-2 py-2 text-sm outline-none"
-                          value={newItemQty}
-                          onChange={(e) => setNewItemQty(Number(e.target.value))}
-                      />
-                      <button onClick={handleAddItemToShoppingList} className="bg-slate-900 text-white p-2 rounded-lg hover:bg-slate-800">
-                          <Plus className="w-5 h-5" />
-                      </button>
-                  </div>
-
-                  <div className="space-y-2 flex-1 overflow-y-auto max-h-[400px] border-t border-slate-100 pt-2">
-                      {shoppingList.map(item => (
-                          <div key={item.id} className="flex justify-between items-center p-2 bg-slate-50 rounded border border-slate-100 group">
-                              <span className="text-sm font-medium text-slate-700">{item.name} <span className="text-slate-400 text-xs">x{item.quantity}</span></span>
-                              <button onClick={() => setShoppingList(s => s.filter(i => i.id !== item.id))} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><X className="w-4 h-4" /></button>
-                          </div>
-                      ))}
-                      {shoppingList.length === 0 && <p className="text-center text-slate-400 text-xs py-8">List is empty.</p>}
-                  </div>
-              </div>
-
-              <div className="lg:col-span-2 space-y-6">
-                  {Object.entries(optimizedProcurement.plan).map(([supplier, rawData]) => {
-                      const data = rawData as { items: ShoppingItem[], totalEst: number };
-                      return (
-                      <div key={supplier} className="bg-white rounded-xl shadow-sm border border-emerald-100 p-6 relative overflow-hidden">
-                          <div className="absolute top-0 right-0 p-4 opacity-10">
-                              <Award className="w-24 h-24 text-emerald-600" />
-                          </div>
-                          <div className="flex justify-between items-start mb-4 relative z-10">
-                              <div>
-                                  <h3 className="font-bold text-xl text-slate-900">{supplier}</h3>
-                                  <p className="text-emerald-600 text-sm font-bold flex items-center gap-1"><Sparkles className="w-3 h-3" /> Best Price Option</p>
-                              </div>
-                              <div className="text-right">
-                                  <p className="text-xs text-slate-400 uppercase font-bold">Est. Total</p>
-                                  <p className="text-2xl font-bold text-slate-900">${data.totalEst.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
-                              </div>
-                          </div>
-                          <div className="bg-slate-50 rounded-lg p-3 space-y-2 relative z-10 border border-slate-100">
-                              {data.items.map(item => (
-                                  <div key={item.id} className="flex justify-between text-sm">
-                                      <span>{item.name}</span>
-                                      <span className="font-bold text-slate-700">x{item.quantity}</span>
-                                  </div>
-                              ))}
-                          </div>
-                          <button className="mt-4 w-full bg-slate-900 text-white py-2 rounded-lg font-bold text-sm hover:bg-slate-800 flex items-center justify-center gap-2">
-                              <Download className="w-4 h-4" /> Export PO PDF
-                          </button>
-                      </div>
-                  )})}
-              </div>
-          </div>
-      )}
-      
       {activeTab === 'entry' && (
           <div className="space-y-6">
               <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex flex-col md:flex-row justify-between items-center gap-4">
@@ -973,8 +1140,40 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* SHAREPOINT IMPORT CARD */}
                   <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                      <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><FileSpreadsheet className="w-5 h-5 text-green-600"/> Bulk Import</h3>
+                      <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                          <Cloud className="w-5 h-5 text-blue-600"/> SharePoint Excel Sync
+                      </h3>
+                      {savedSpConfig ? (
+                          <div className="bg-blue-50 rounded-lg p-4 border border-blue-100 mb-3">
+                              <p className="text-xs font-bold text-blue-500 uppercase mb-1">Linked File</p>
+                              <div className="flex items-center justify-between">
+                                  <p className="font-bold text-slate-700 truncate mr-2" title={savedSpConfig.fileName}>{savedSpConfig.fileName}</p>
+                                  <button onClick={() => { setSavedSpConfig(null); localStorage.removeItem('carsan_price_file_config'); }} className="text-xs text-red-500 hover:underline">Unlink</button>
+                              </div>
+                              <button 
+                                  onClick={handleQuickSync}
+                                  className="mt-3 w-full bg-blue-600 text-white py-2 rounded-lg font-bold text-sm hover:bg-blue-700 flex items-center justify-center gap-2"
+                              >
+                                  {isSyncingQb ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                                  Sync Now
+                              </button>
+                          </div>
+                      ) : (
+                          <button 
+                              onClick={() => setShowSpImport(true)}
+                              className="w-full border-2 border-dashed border-blue-200 bg-blue-50 text-blue-700 py-8 rounded-xl font-bold text-sm hover:bg-blue-100 transition-colors flex flex-col items-center justify-center gap-2"
+                          >
+                              <LinkIcon className="w-6 h-6" />
+                              Connect Cloud File
+                          </button>
+                      )}
+                      <p className="text-xs text-slate-400 mt-2 text-center">Syncs pricing from your centralized Excel sheet.</p>
+                  </div>
+
+                  <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                      <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><FileSpreadsheet className="w-5 h-5 text-green-600"/> Local Bulk Import</h3>
                       <button onClick={() => bulkInputRef.current?.click()} className="w-full border border-slate-300 text-slate-700 py-2 rounded-lg font-bold text-sm hover:bg-slate-50 mb-2">Select Excel File</button>
                       <input type="file" ref={bulkInputRef} className="hidden" accept=".xlsx,.xls,.csv" onChange={(e) => {
                           const file = e.target.files?.[0];

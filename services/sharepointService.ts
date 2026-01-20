@@ -7,8 +7,9 @@ export interface SPSite { id: string; displayName: string; webUrl: string; }
 export interface SPList { id: string; displayName: string; }
 export interface SPColumn { name: string; displayName: string; }
 export interface SPItem { id: string; fields: any; createdDateTime?: string; }
+export interface SPDriveItem { id: string; name: string; webUrl: string; lastModifiedDateTime: string; }
 
-const SCOPES = ["Sites.ReadWrite.All", "Sites.Manage.All"];
+const SCOPES = ["Sites.ReadWrite.All", "Sites.Manage.All", "Files.Read.All"];
 
 export const searchSharePointSites = async (query: string): Promise<SPSite[]> => {
     const token = await getGraphToken(SCOPES);
@@ -49,6 +50,34 @@ export const getListItems = async (siteId: string, listId: string): Promise<SPIt
         nextLink = data['@odata.nextLink'] || null;
     }
     return items;
+};
+
+// --- FILE / EXCEL HANDLING ---
+
+export const getSiteDrive = async (siteId: string): Promise<string> => {
+    const token = await getGraphToken(SCOPES);
+    // Get the default document library (drive) for the site
+    const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/drive`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error("Failed to fetch site drive");
+    const data = await res.json();
+    return data.id;
+};
+
+export const searchExcelFiles = async (driveId: string, query: string): Promise<SPDriveItem[]> => {
+    const token = await getGraphToken(SCOPES);
+    const searchQuery = query || "xlsx"; 
+    const res = await fetch(`https://graph.microsoft.com/v1.0/drives/${driveId}/root/search(q='${searchQuery}')`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error("Failed to search files");
+    const data = await res.json();
+    // Filter for excel files only
+    return data.value.filter((item: any) => item.name.endsWith('.xlsx') || item.name.endsWith('.xls') || item.name.endsWith('.csv'));
+};
+
+export const downloadFileContent = async (driveId: string, itemId: string): Promise<ArrayBuffer> => {
+    const token = await getGraphToken(SCOPES);
+    const res = await fetch(`https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/content`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error("Failed to download file");
+    return await res.arrayBuffer();
 };
 
 // Smart Status Mapper (Etapa -> App Status)
