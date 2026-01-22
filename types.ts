@@ -1,5 +1,4 @@
 
-
 export enum ViewState {
   DASHBOARD = 'DASHBOARD',
   PROJECTS = 'PROJECTS',
@@ -67,6 +66,7 @@ export interface ProjectEstimate {
   awardedDate?: string;
   startDate?: string;
   completionDate?: string;
+  lastContactDate?: string; // New field for follow-up automation
   status: 'Draft' | 'Sent' | 'Won' | 'Lost' | 'Ongoing' | 'Completed' | 'Finalized';
   contractValue?: number;
   laborRate: number;

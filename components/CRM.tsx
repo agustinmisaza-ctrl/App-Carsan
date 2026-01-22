@@ -1,9 +1,9 @@
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Lead, ProjectEstimate } from '../types';
 import { fetchOutlookEmails, sendOutlookEmail, getStoredClientId, setStoredClientId, getStoredTenantId, setStoredTenantId } from '../services/emailIntegration';
 import { analyzeIncomingEmail } from '../services/geminiService';
-import { Trello, List, Search, RefreshCw, Briefcase, Mail, CheckCircle, XCircle, ArrowRight, Trash2, Eye, Sparkles, MapPin, Phone, AlertTriangle, X, Send, Plus, Loader2, Settings } from 'lucide-react';
+import { Trello, List, Search, RefreshCw, Briefcase, Mail, CheckCircle, XCircle, ArrowRight, Trash2, Eye, Sparkles, MapPin, Phone, AlertTriangle, X, Send, Plus, Loader2, Settings, Clock, Calendar, Zap } from 'lucide-react';
 
 interface CRMProps {
     leads: Lead[];
@@ -14,8 +14,24 @@ interface CRMProps {
     setProjects?: (projects: ProjectEstimate[]) => void;
 }
 
+// Pre-defined templates for automation
+const EMAIL_TEMPLATES = {
+    'check-in': {
+        subject: "Checking in on our proposal: {project}",
+        body: "Hi {client},\n\nI hope you're having a great week. I just wanted to bubble our proposal for {project} to the top of your inbox.\n\nDo you have any questions about the estimate? We are ready to get started when you are.\n\nBest,\nCarsan Electric"
+    },
+    'urgent': {
+        subject: "Update required: {project} Estimate",
+        body: "Hello {client},\n\nWe are finalizing our schedule for the upcoming weeks. Please let us know if you'd like to proceed with {project} so we can reserve your slot.\n\nThank you,\nCarsan Electric"
+    },
+    'closing': {
+        subject: "Closing file for {project}?",
+        body: "Hi {client},\n\nI haven't heard back regarding the proposal for {project}. Should I assume this project is on hold or awarded to someone else?\n\nI'll close the file on my end if I don't hear back, but we'd love to work with you.\n\nRegards,\nCarsan Electric"
+    }
+};
+
 export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setProjects }) => {
-    const [activeTab, setActiveTab] = useState<'pipeline' | 'leads'>('pipeline');
+    const [activeTab, setActiveTab] = useState<'pipeline' | 'leads' | 'followup'>('followup');
     const [isLoading, setIsLoading] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [analysisProgress, setAnalysisProgress] = useState('');
@@ -29,46 +45,60 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
     const [tenantId, setTenantId] = useState(getStoredTenantId() || '');
 
     // Email & Manual Entry State
-    const [emailCompose, setEmailCompose] = useState<{to: string, name: string, subject: string, body: string} | null>(null);
+    const [emailCompose, setEmailCompose] = useState<{to: string, name: string, subject: string, body: string, projectId?: string} | null>(null);
     const [isSendingEmail, setIsSendingEmail] = useState(false);
     const [showAddLead, setShowAddLead] = useState(false);
     const [newLead, setNewLead] = useState<Partial<Lead>>({ name: '', email: '', company: '', phone: '', source: 'Manual', notes: '' });
+
+    // Automation State
+    const [selectedTemplate, setSelectedTemplate] = useState<keyof typeof EMAIL_TEMPLATES>('check-in');
+    const [autoPilotProcessing, setAutoPilotProcessing] = useState(false);
+
+    // --- DERIVED DATA ---
+    
+    // Filter for "Sent" proposals that might need follow up
+    const followUpProjects = useMemo(() => {
+        return projects
+            .filter(p => p.status === 'Sent')
+            .map(p => {
+                const sentDate = new Date(p.deliveryDate || p.dateCreated);
+                const lastContact = p.lastContactDate ? new Date(p.lastContactDate) : sentDate;
+                const daysSinceSent = Math.floor((new Date().getTime() - sentDate.getTime()) / (1000 * 3600 * 24));
+                const daysSinceContact = Math.floor((new Date().getTime() - lastContact.getTime()) / (1000 * 3600 * 24));
+                
+                let urgency: 'High' | 'Medium' | 'Low' = 'Low';
+                if (daysSinceContact > 7) urgency = 'High';
+                else if (daysSinceContact > 3) urgency = 'Medium';
+
+                return { ...p, daysSinceSent, daysSinceContact, urgency };
+            })
+            .sort((a, b) => b.daysSinceContact - a.daysSinceContact); // Oldest contact first
+    }, [projects]);
+
+    const totalPipelineValue = followUpProjects.reduce((sum, p) => sum + (p.contractValue || 0), 0);
+    const staleCount = followUpProjects.filter(p => p.daysSinceContact > 7).length;
+
+    // --- HANDLERS ---
 
     const handleFetchLeads = async () => {
         setIsLoading(true);
         setAnalysisProgress('Connecting to Outlook...');
         try {
-            // 1. Fetch raw emails
             const data = await fetchOutlookEmails();
             setAnalysisProgress(`Fetched ${data.length} emails. Analyzing with AI...`);
             
-            // 2. Enhance with AI
             const enhancedLeads: Lead[] = [];
-            
             for (const emailLead of data) {
-                // Check if we already have this lead
                 const exists = leads.find(l => l.id === emailLead.id);
                 if (exists) {
                     enhancedLeads.push(exists);
                     continue;
                 }
-
-                // AI Analysis
                 const subject = emailLead.notes?.split('\n')[0] || "No Subject";
                 const bodyPreview = emailLead.notes || "";
                 
                 const analysis = await analyzeIncomingEmail(subject, bodyPreview);
-                
-                // Construct enhanced note
-                const enhancedNote = `
-**Project:** ${analysis.projectName}
-**Client:** ${analysis.clientName}
-**Urgency:** ${analysis.urgency}
-**Summary:** ${analysis.summary}
-
-**Key Details:**
-${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
-                `.trim();
+                const enhancedNote = `**Project:** ${analysis.projectName}\n**Client:** ${analysis.clientName}\n**Urgency:** ${analysis.urgency}\n**Summary:** ${analysis.summary}\n\n**Key Details:**\n${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}`.trim();
 
                 enhancedLeads.push({
                     ...emailLead,
@@ -78,7 +108,6 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
                 });
             }
 
-            // Merge and Dedupe
             const finalLeads = [...enhancedLeads];
             leads.forEach(old => {
                 if (!finalLeads.find(f => f.id === old.id)) {
@@ -87,7 +116,6 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
             });
             
             finalLeads.sort((a,b) => new Date(b.dateAdded).getTime() - new Date(a.dateAdded).getTime());
-
             setLeads(finalLeads);
             setAnalysisProgress('');
             alert(`Sync Complete. Processed ${data.length} items.`);
@@ -102,8 +130,6 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
 
     const convertToOpportunity = (lead: Lead) => {
         if (!setProjects) return;
-        
-        // Extract Project Name from AI notes if possible
         const projectMatch = lead.notes?.match(/\*\*Project:\*\* (.*)/);
         const projectName = projectMatch ? projectMatch[1] : `Project for ${lead.name}`;
 
@@ -124,18 +150,22 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
         setActiveTab('pipeline');
     };
 
-    const deleteLead = (id: string) => {
-        if(confirm("Are you sure you want to permanently erase this email/lead from the CRM?")) {
-            setLeads(leads.filter(l => l.id !== id));
-            if (selectedLead?.id === id) setSelectedLead(null);
-        }
-    };
-
     const handleSendEmail = async () => {
         if (!emailCompose) return;
         setIsSendingEmail(true);
         try {
             await sendOutlookEmail(emailCompose.to, emailCompose.subject, emailCompose.body);
+            
+            // Update project last contact date if associated
+            if (emailCompose.projectId && setProjects) {
+                const updated = projects.map(p => 
+                    p.id === emailCompose.projectId 
+                    ? { ...p, lastContactDate: new Date().toISOString() } 
+                    : p
+                );
+                setProjects(updated);
+            }
+
             alert(`Email sent to ${emailCompose.to}`);
             setEmailCompose(null);
         } catch (e: any) {
@@ -145,35 +175,60 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
         }
     };
 
-    const handleAddManualLead = () => {
-        if (!newLead.name || !newLead.email) {
-            alert("Name and Email are required");
+    const prepareAutoFollowUp = (project: ProjectEstimate) => {
+        const template = EMAIL_TEMPLATES[selectedTemplate];
+        const subject = template.subject.replace('{project}', project.name);
+        const body = template.body
+            .replace('{client}', project.client.split(' ')[0]) // First name estimate
+            .replace('{project}', project.name);
+
+        setEmailCompose({
+            to: project.contactInfo || '',
+            name: project.client,
+            subject: subject,
+            body: body,
+            projectId: project.id
+        });
+    };
+
+    // --- BATCH PROCESSING (SIMULATED AUTO-PILOT) ---
+    const handleRunAutoPilot = async () => {
+        const eligible = followUpProjects.filter(p => p.daysSinceContact > 5 && p.contactInfo && p.contactInfo.includes('@'));
+        
+        if (eligible.length === 0) {
+            alert("No projects currently meet the criteria for auto-follow up (> 5 days silence).");
             return;
         }
-        const lead: Lead = {
-            id: `manual-${Date.now()}`,
-            name: newLead.name,
-            email: newLead.email,
-            company: newLead.company || 'Unknown',
-            phone: newLead.phone || '',
-            source: 'Manual',
-            status: 'New',
-            notes: newLead.notes || 'Manually added lead.',
-            dateAdded: new Date().toISOString()
-        };
-        setLeads([lead, ...leads]);
-        setShowAddLead(false);
-        setNewLead({ name: '', email: '', company: '', phone: '', source: 'Manual', notes: '' });
+
+        if (!confirm(`Found ${eligible.length} projects needing follow-up. This will send emails one by one. Proceed?`)) return;
+
+        setAutoPilotProcessing(true);
+        let successCount = 0;
+
+        for (const p of eligible) {
+            const template = EMAIL_TEMPLATES['check-in']; // Default to check-in for batch
+            const subject = template.subject.replace('{project}', p.name);
+            const body = template.body.replace('{client}', p.client).replace('{project}', p.name);
+
+            try {
+                await sendOutlookEmail(p.contactInfo!, subject, body);
+                // Update local state to reflect sent
+                if (setProjects) {
+                    setProjects(prev => prev.map(proj => proj.id === p.id ? { ...proj, lastContactDate: new Date().toISOString() } : proj));
+                }
+                successCount++;
+                // Small delay to be polite to API
+                await new Promise(r => setTimeout(r, 1000));
+            } catch (e) {
+                console.error(`Failed to email ${p.client}`, e);
+            }
+        }
+
+        setAutoPilotProcessing(false);
+        alert(`Auto-Pilot Complete. Sent ${successCount} emails.`);
     };
 
-    const handleSaveSettings = () => {
-        setStoredClientId(clientId);
-        setStoredTenantId(tenantId);
-        setShowSettings(false);
-        alert("Settings saved. Please try syncing again.");
-    };
-
-    // --- DRAG AND DROP HANDLERS ---
+    // --- DRAG AND DROP HANDLERS (KANBAN) ---
     const handleDragStart = (e: React.DragEvent, projectId: string) => {
         e.dataTransfer.setData("projectId", projectId);
         e.dataTransfer.effectAllowed = "move";
@@ -187,16 +242,13 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
     const handleDrop = (e: React.DragEvent, newStatus: ProjectEstimate['status']) => {
         e.preventDefault();
         const projectId = e.dataTransfer.getData("projectId");
-        
         if (projectId && setProjects) {
             const updatedProjects = projects.map(p => {
                 if (p.id === projectId) {
                     const today = new Date().toISOString();
                     const updated = { ...p, status: newStatus };
-                    // Auto-update dates based on status change
                     if (newStatus === 'Sent' && !p.deliveryDate) updated.deliveryDate = today;
                     if (newStatus === 'Won' && !p.awardedDate) updated.awardedDate = today;
-                    if (newStatus === 'Ongoing' && !p.startDate) updated.startDate = today.split('T')[0];
                     return updated;
                 }
                 return p;
@@ -205,7 +257,6 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
         }
     };
 
-    // --- PIPELINE KANBAN ---
     const renderKanbanColumn = (title: string, status: ProjectEstimate['status'], colorClass: string) => {
         const items = projects.filter(p => p.status === status);
         const totalValue = items.reduce((sum, p) => sum + (p.contractValue || 0), 0);
@@ -243,42 +294,8 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
                                     {new Date(p.dateCreated).toLocaleDateString()}
                                 </span>
                             </div>
-                            
-                            {setProjects && (
-                                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-                                    {status === 'Draft' && (
-                                        <button 
-                                            onClick={(e) => { e.stopPropagation(); const upd = projects.map(proj => proj.id === p.id ? {...proj, status: 'Sent' as const} : proj); setProjects(upd); }}
-                                            className="p-1 bg-blue-100 text-blue-600 rounded hover:bg-blue-200" title="Move to Sent"
-                                        >
-                                            <ArrowRight className="w-3 h-3" />
-                                        </button>
-                                    )}
-                                    {status === 'Sent' && (
-                                        <div className="flex gap-1">
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); const upd = projects.map(proj => proj.id === p.id ? {...proj, status: 'Won' as const, awardedDate: new Date().toISOString()} : proj); setProjects(upd); }}
-                                                className="p-1 bg-emerald-100 text-emerald-600 rounded hover:bg-emerald-200" title="Mark Won"
-                                            >
-                                                <CheckCircle className="w-3 h-3" />
-                                            </button>
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); const upd = projects.map(proj => proj.id === p.id ? {...proj, status: 'Lost' as const} : proj); setProjects(upd); }}
-                                                className="p-1 bg-red-100 text-red-600 rounded hover:bg-red-200" title="Mark Lost"
-                                            >
-                                                <XCircle className="w-3 h-3" />
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
                         </div>
                     ))}
-                    {items.length === 0 && (
-                        <div className="text-center py-8 text-slate-400 text-xs italic border-2 border-dashed border-slate-200 rounded-lg m-2">
-                            Arrastra proyectos aquí
-                        </div>
-                    )}
                 </div>
             </div>
         );
@@ -299,37 +316,19 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
                         </div>
                         <div className="p-6 space-y-4">
                             <p className="text-xs text-slate-500 mb-4">
-                                To sync emails, you must register an app in Azure AD and provide the Client ID here. 
-                                <br/>
-                                <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noreferrer" className="text-blue-600 underline">Azure Portal</a>
+                                To sync emails, you must register an app in Azure AD.
                             </p>
                             <div>
-                                <label className="text-xs font-bold text-slate-500 uppercase">Client ID (Application ID)</label>
-                                <input 
-                                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1 focus:ring-2 focus:ring-blue-500 outline-none"
-                                    value={clientId}
-                                    onChange={(e) => setClientId(e.target.value)}
-                                    placeholder="e.g. f13f2359-eec6-..."
-                                />
+                                <label className="text-xs font-bold text-slate-500 uppercase">Client ID</label>
+                                <input className="w-full border p-2 rounded text-sm mt-1" value={clientId} onChange={(e) => setClientId(e.target.value)} />
                             </div>
                             <div>
-                                <label className="text-xs font-bold text-slate-500 uppercase">Tenant ID (Optional)</label>
-                                <input 
-                                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1 focus:ring-2 focus:ring-blue-500 outline-none"
-                                    value={tenantId}
-                                    onChange={(e) => setTenantId(e.target.value)}
-                                    placeholder="common"
-                                />
+                                <label className="text-xs font-bold text-slate-500 uppercase">Tenant ID</label>
+                                <input className="w-full border p-2 rounded text-sm mt-1" value={tenantId} onChange={(e) => setTenantId(e.target.value)} />
                             </div>
                         </div>
                         <div className="p-4 border-t border-slate-100 flex justify-end gap-2 bg-slate-50">
-                            <button onClick={() => setShowSettings(false)} className="px-4 py-2 text-slate-600 text-sm font-bold hover:bg-slate-100 rounded-lg">Cancel</button>
-                            <button 
-                                onClick={handleSaveSettings}
-                                className="px-6 py-2 bg-slate-900 text-white text-sm font-bold rounded-lg hover:bg-slate-800"
-                            >
-                                Save
-                            </button>
+                            <button onClick={() => { setStoredClientId(clientId); setStoredTenantId(tenantId); setShowSettings(false); }} className="px-6 py-2 bg-slate-900 text-white text-sm font-bold rounded-lg hover:bg-slate-800">Save</button>
                         </div>
                     </div>
                 </div>
@@ -352,28 +351,16 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
                             </div>
                             <div>
                                 <label className="text-xs font-bold text-slate-500 uppercase">Subject</label>
-                                <input 
-                                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1 focus:ring-2 focus:ring-blue-500 outline-none"
-                                    value={emailCompose.subject}
-                                    onChange={(e) => setEmailCompose({...emailCompose, subject: e.target.value})}
-                                />
+                                <input className="w-full border rounded p-2 text-sm mt-1" value={emailCompose.subject} onChange={(e) => setEmailCompose({...emailCompose, subject: e.target.value})} />
                             </div>
                             <div>
                                 <label className="text-xs font-bold text-slate-500 uppercase">Message</label>
-                                <textarea 
-                                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1 focus:ring-2 focus:ring-blue-500 outline-none min-h-[150px]"
-                                    value={emailCompose.body}
-                                    onChange={(e) => setEmailCompose({...emailCompose, body: e.target.value})}
-                                />
+                                <textarea className="w-full border rounded p-2 text-sm mt-1 min-h-[150px]" value={emailCompose.body} onChange={(e) => setEmailCompose({...emailCompose, body: e.target.value})} />
                             </div>
                         </div>
                         <div className="p-4 border-t border-slate-100 flex justify-end gap-2 bg-slate-50">
-                            <button onClick={() => setEmailCompose(null)} className="px-4 py-2 text-slate-600 text-sm font-bold hover:bg-slate-100 rounded-lg">Cancel</button>
-                            <button 
-                                onClick={handleSendEmail}
-                                disabled={isSendingEmail}
-                                className="px-6 py-2 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 flex items-center gap-2 disabled:opacity-70"
-                            >
+                            <button onClick={() => setEmailCompose(null)} className="px-4 py-2 text-slate-600 text-sm font-bold">Cancel</button>
+                            <button onClick={handleSendEmail} disabled={isSendingEmail} className="px-6 py-2 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 flex items-center gap-2 disabled:opacity-70">
                                 {isSendingEmail ? <Loader2 className="w-4 h-4 animate-spin"/> : <Send className="w-4 h-4"/>} Send Email
                             </button>
                         </div>
@@ -381,35 +368,19 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
                 </div>
             )}
 
-            {/* ADD MANUAL LEAD MODAL */}
-            {showAddLead && (
-                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-                        <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                            <h3 className="font-bold text-slate-800">Add New Lead</h3>
-                            <button onClick={() => setShowAddLead(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5"/></button>
-                        </div>
-                        <div className="p-6 space-y-4">
-                            <input placeholder="Lead Name" className="w-full border rounded-lg p-2 text-sm" value={newLead.name} onChange={e => setNewLead({...newLead, name: e.target.value})} />
-                            <input placeholder="Email" className="w-full border rounded-lg p-2 text-sm" value={newLead.email} onChange={e => setNewLead({...newLead, email: e.target.value})} />
-                            <input placeholder="Company" className="w-full border rounded-lg p-2 text-sm" value={newLead.company} onChange={e => setNewLead({...newLead, company: e.target.value})} />
-                            <input placeholder="Phone" className="w-full border rounded-lg p-2 text-sm" value={newLead.phone} onChange={e => setNewLead({...newLead, phone: e.target.value})} />
-                            <textarea placeholder="Notes" className="w-full border rounded-lg p-2 text-sm" value={newLead.notes} onChange={e => setNewLead({...newLead, notes: e.target.value})} />
-                        </div>
-                        <div className="p-4 border-t border-slate-100 flex justify-end gap-2 bg-slate-50">
-                            <button onClick={() => setShowAddLead(false)} className="px-4 py-2 text-slate-600 text-sm font-bold">Cancel</button>
-                            <button onClick={handleAddManualLead} className="px-6 py-2 bg-slate-900 text-white text-sm font-bold rounded-lg hover:bg-slate-800">Add Lead</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
+            {/* TAB HEADER */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 shrink-0">
                 <div>
-                    <h1 className="text-3xl font-bold text-slate-900 tracking-tight">CRM & Pipeline</h1>
-                    <p className="text-slate-500 mt-1">Manage leads and project stages.</p>
+                    <h1 className="text-3xl font-bold text-slate-900 tracking-tight">CRM & Seguimiento</h1>
+                    <p className="text-slate-500 mt-1">Manage leads, track sent proposals, and automate follow-ups.</p>
                 </div>
-                <div className="bg-slate-100 p-1 rounded-lg flex">
+                <div className="bg-slate-100 p-1 rounded-lg flex shadow-sm border border-slate-200">
+                    <button 
+                        onClick={() => setActiveTab('followup')}
+                        className={`px-6 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'followup' ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                        <Zap className="w-4 h-4" /> Smart Follow-Up
+                    </button>
                     <button 
                         onClick={() => setActiveTab('pipeline')}
                         className={`px-6 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'pipeline' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
@@ -424,6 +395,115 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
                     </button>
                 </div>
             </div>
+
+            {/* --- SMART FOLLOW UP VIEW (NEW) --- */}
+            {activeTab === 'followup' && (
+                <div className="flex-1 flex flex-col gap-6 overflow-hidden">
+                    {/* Stats Banner */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 shrink-0">
+                        <div className="bg-gradient-to-br from-slate-800 to-slate-900 text-white p-5 rounded-xl shadow-lg">
+                            <p className="text-slate-300 text-xs font-bold uppercase tracking-wider">Total Value Sent</p>
+                            <p className="text-2xl font-bold mt-1">${totalPipelineValue.toLocaleString()}</p>
+                            <p className="text-slate-400 text-[10px] mt-1">{followUpProjects.length} proposals waiting</p>
+                        </div>
+                        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                            <p className="text-slate-400 text-xs font-bold uppercase tracking-wider">Stale Proposals (>7 Days)</p>
+                            <div className="flex items-end justify-between mt-1">
+                                <p className={`text-2xl font-bold ${staleCount > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{staleCount}</p>
+                                {staleCount > 0 && <AlertTriangle className="w-5 h-5 text-red-500 mb-1" />}
+                            </div>
+                        </div>
+                        <div className="md:col-span-2 bg-indigo-50 border border-indigo-100 p-5 rounded-xl flex items-center justify-between shadow-sm">
+                            <div>
+                                <h3 className="font-bold text-indigo-900 flex items-center gap-2"><Zap className="w-4 h-4"/> Auto-Pilot Mode</h3>
+                                <p className="text-xs text-indigo-700 mt-1 max-w-xs">Send pre-written follow-up emails to all eligible clients instantly.</p>
+                            </div>
+                            <button 
+                                onClick={handleRunAutoPilot}
+                                disabled={autoPilotProcessing}
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-xl font-bold text-sm shadow-md flex items-center gap-2 disabled:opacity-50"
+                            >
+                                {autoPilotProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                                Run Batch Follow-Up
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Main List */}
+                    <div className="bg-white border border-slate-200 rounded-xl flex-1 overflow-hidden flex flex-col shadow-sm">
+                        <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+                            <h3 className="font-bold text-slate-800 flex items-center gap-2"><Clock className="w-4 h-4 text-slate-500"/> Proposals Pending Response</h3>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs text-slate-500">Default Template:</span>
+                                <select 
+                                    className="text-xs border border-slate-300 rounded p-1"
+                                    value={selectedTemplate}
+                                    onChange={(e) => setSelectedTemplate(e.target.value as any)}
+                                >
+                                    <option value="check-in">Friendly Check-in</option>
+                                    <option value="urgent">Urgent Update</option>
+                                    <option value="closing">Closing File</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-white text-slate-500 font-bold text-xs border-b border-slate-100 uppercase sticky top-0 z-10">
+                                    <tr>
+                                        <th className="px-6 py-3">Project / Client</th>
+                                        <th className="px-4 py-3">Sent Date</th>
+                                        <th className="px-4 py-3">Last Contact</th>
+                                        <th className="px-4 py-3">Status</th>
+                                        <th className="px-6 py-3 text-right">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-50">
+                                    {followUpProjects.map(p => (
+                                        <tr key={p.id} className="hover:bg-slate-50 group">
+                                            <td className="px-6 py-4">
+                                                <div className="font-bold text-slate-900">{p.name}</div>
+                                                <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5"><Briefcase className="w-3 h-3"/> {p.client}</div>
+                                            </td>
+                                            <td className="px-4 py-4 text-slate-600">
+                                                {new Date(p.deliveryDate || p.dateCreated).toLocaleDateString()}
+                                                <div className="text-[10px] text-slate-400">{p.daysSinceSent} days ago</div>
+                                            </td>
+                                            <td className="px-4 py-4">
+                                                <div className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-bold ${p.urgency === 'High' ? 'bg-red-50 text-red-600 border border-red-100' : p.urgency === 'Medium' ? 'bg-orange-50 text-orange-600' : 'bg-slate-100 text-slate-600'}`}>
+                                                    {p.urgency === 'High' && <AlertTriangle className="w-3 h-3" />}
+                                                    {p.daysSinceContact} days silent
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-4">
+                                                <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs font-bold border border-blue-100">Sent</span>
+                                            </td>
+                                            <td className="px-6 py-4 text-right">
+                                                <div className="flex justify-end gap-2">
+                                                    <button 
+                                                        onClick={() => prepareAutoFollowUp(p)}
+                                                        className="flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:border-indigo-300 hover:text-indigo-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm"
+                                                    >
+                                                        <Mail className="w-3 h-3" /> Email
+                                                    </button>
+                                                    {setProjects && (
+                                                        <>
+                                                            <button onClick={() => { if(confirm("Mark Won?")) setProjects(projects.map(proj => proj.id === p.id ? {...proj, status: 'Won'} : proj)); }} className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded" title="Won"><CheckCircle className="w-4 h-4"/></button>
+                                                            <button onClick={() => { if(confirm("Mark Lost?")) setProjects(projects.map(proj => proj.id === p.id ? {...proj, status: 'Lost'} : proj)); }} className="p-1.5 text-red-400 hover:bg-red-50 rounded" title="Lost"><XCircle className="w-4 h-4"/></button>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {followUpProjects.length === 0 && (
+                                        <tr><td colSpan={5} className="py-12 text-center text-slate-400">No sent proposals pending follow-up.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* --- PIPELINE VIEW --- */}
             {activeTab === 'pipeline' && (
@@ -443,205 +523,34 @@ ${analysis.keyDetails?.map((d:string) => `- ${d}`).join('\n')}
                     <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
                         <div className="relative w-72">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                            <input 
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                placeholder="Search leads..." 
-                                className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                            />
+                            <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search leads..." className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                         </div>
                         <div className="flex items-center gap-2">
                             {analysisProgress && <span className="text-xs text-blue-600 font-medium animate-pulse">{analysisProgress}</span>}
-                            <button 
-                                onClick={() => setShowSettings(true)}
-                                className="bg-white border border-slate-300 text-slate-700 p-2 rounded-lg hover:bg-slate-50"
-                                title="Configure Outlook"
-                            >
-                                <Settings className="w-4 h-4" />
-                            </button>
-                            <button 
-                                onClick={() => setShowAddLead(true)}
-                                className="bg-white border border-slate-300 text-slate-700 px-3 py-2 rounded-lg text-sm font-bold hover:bg-slate-50 flex items-center gap-2"
-                            >
-                                <Plus className="w-4 h-4" /> Add Lead
-                            </button>
-                            <button 
-                                onClick={handleFetchLeads}
-                                disabled={isLoading}
-                                className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-800 flex items-center gap-2 disabled:opacity-70"
-                            >
-                                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-                                Sync Outlook
-                            </button>
+                            <button onClick={() => setShowSettings(true)} className="bg-white border border-slate-300 text-slate-700 p-2 rounded-lg hover:bg-slate-50"><Settings className="w-4 h-4" /></button>
+                            <button onClick={handleFetchLeads} disabled={isLoading} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-800 flex items-center gap-2 disabled:opacity-70"><RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} /> Sync Outlook</button>
                         </div>
                     </div>
-
                     <div className="flex-1 overflow-y-auto">
                         <table className="w-full text-sm text-left">
-                            <thead className="bg-slate-100 text-slate-500 font-bold uppercase text-xs sticky top-0">
-                                <tr>
-                                    <th className="px-6 py-3">From (Contact)</th>
-                                    <th className="px-6 py-3">Client / Project</th>
-                                    <th className="px-6 py-3">Summary</th>
-                                    <th className="px-6 py-3 text-right">Actions</th>
-                                </tr>
-                            </thead>
+                            <thead className="bg-slate-100 text-slate-500 font-bold uppercase text-xs sticky top-0"><tr><th className="px-6 py-3">From (Contact)</th><th className="px-6 py-3">Client / Project</th><th className="px-6 py-3">Summary</th><th className="px-6 py-3 text-right">Actions</th></tr></thead>
                             <tbody className="divide-y divide-slate-100">
-                                {leads
-                                    .filter(l => l.name.toLowerCase().includes(searchTerm.toLowerCase()) || l.email.toLowerCase().includes(searchTerm.toLowerCase()))
-                                    .map(lead => {
-                                        // Attempt to extract structured data from formatted notes if AI processed it
-                                        const projectMatch = lead.notes?.match(/\*\*Project:\*\* (.*)/);
-                                        const projectDisplay = projectMatch ? projectMatch[1] : lead.company;
-                                        
-                                        const summaryMatch = lead.notes?.match(/\*\*Summary:\*\* (.*)/);
-                                        const summaryDisplay = summaryMatch ? summaryMatch[1].substring(0, 60) + '...' : (lead.notes?.substring(0, 50) + '...');
-
-                                        return (
-                                            <tr key={lead.id} className="hover:bg-slate-50 group transition-colors">
-                                                <td className="px-6 py-4">
-                                                    <div className="font-bold text-slate-900">{lead.name}</div>
-                                                    <div className="flex items-center gap-1 text-xs text-slate-500 mt-1">
-                                                        <Mail className="w-3 h-3" /> {lead.email}
-                                                    </div>
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <div className="font-bold text-blue-600 text-xs uppercase tracking-wide">{lead.company}</div>
-                                                    <div className="text-sm font-medium text-slate-700">{projectDisplay}</div>
-                                                    <div className="text-[10px] text-slate-400 mt-1">
-                                                        {new Date(lead.dateAdded).toLocaleDateString()}
-                                                    </div>
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <div className="max-w-md text-slate-500 text-xs leading-relaxed">
-                                                        {summaryDisplay}
-                                                    </div>
-                                                </td>
-                                                <td className="px-6 py-4 text-right">
-                                                    <div className="flex justify-end gap-2">
-                                                        <button 
-                                                            onClick={() => setEmailCompose({to: lead.email, name: lead.name, subject: `Re: Project Inquiry`, body: `Hi ${lead.name},\n\n`})}
-                                                            className="p-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition"
-                                                            title="Send Email"
-                                                        >
-                                                            <Mail className="w-4 h-4" />
-                                                        </button>
-                                                        <button 
-                                                            onClick={() => setSelectedLead(lead)}
-                                                            className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition"
-                                                            title="View Details"
-                                                        >
-                                                            <Eye className="w-4 h-4" />
-                                                        </button>
-                                                        <button 
-                                                            onClick={() => convertToOpportunity(lead)}
-                                                            className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition"
-                                                            title="Convert to Estimate"
-                                                        >
-                                                            <Briefcase className="w-4 h-4" />
-                                                        </button>
-                                                        <button 
-                                                            onClick={() => deleteLead(lead.id)}
-                                                            className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition"
-                                                            title="Discard Lead"
-                                                        >
-                                                            <Trash2 className="w-4 h-4" />
-                                                        </button>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                {leads.length === 0 && (
-                                    <tr>
-                                        <td colSpan={4} className="py-12 text-center text-slate-400">
-                                            No leads found. Click "Sync Outlook" to fetch emails or "Add Lead" to create manually.
+                                {leads.filter(l => l.name.toLowerCase().includes(searchTerm.toLowerCase())).map(lead => (
+                                    <tr key={lead.id} className="hover:bg-slate-50 group transition-colors">
+                                        <td className="px-6 py-4"><div className="font-bold text-slate-900">{lead.name}</div><div className="text-xs text-slate-500 mt-1">{lead.email}</div></td>
+                                        <td className="px-6 py-4"><div className="font-bold text-blue-600 text-xs uppercase">{lead.company}</div><div className="text-[10px] text-slate-400 mt-1">{new Date(lead.dateAdded).toLocaleDateString()}</div></td>
+                                        <td className="px-6 py-4"><div className="max-w-md text-slate-500 text-xs">{lead.notes?.substring(0, 60)}...</div></td>
+                                        <td className="px-6 py-4 text-right">
+                                            <div className="flex justify-end gap-2">
+                                                <button onClick={() => setEmailCompose({to: lead.email, name: lead.name, subject: 'Re: Project', body: `Hi ${lead.name},\n\n`})} className="p-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100"><Mail className="w-4 h-4" /></button>
+                                                <button onClick={() => convertToOpportunity(lead)} className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100"><Briefcase className="w-4 h-4" /></button>
+                                            </div>
                                         </td>
                                     </tr>
-                                )}
+                                ))}
                             </tbody>
                         </table>
                     </div>
-
-                    {/* DETAIL MODAL */}
-                    {selectedLead && (
-                        <div className="absolute inset-0 z-50 bg-black/20 backdrop-blur-sm flex justify-end">
-                            <div className="w-full max-w-lg bg-white h-full shadow-2xl p-6 flex flex-col animate-in slide-in-from-right-10 duration-300">
-                                <div className="flex justify-between items-start mb-6">
-                                    <div>
-                                        <h2 className="text-xl font-bold text-slate-900">Lead Details</h2>
-                                        <p className="text-sm text-slate-500">AI Analysis & Original Message</p>
-                                    </div>
-                                    <button onClick={() => setSelectedLead(null)} className="text-slate-400 hover:text-slate-600">
-                                        <X className="w-6 h-6" />
-                                    </button>
-                                </div>
-
-                                <div className="flex-1 overflow-y-auto space-y-6">
-                                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                        <div className="flex items-center gap-3 mb-3">
-                                            <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">
-                                                {selectedLead.name.substring(0,2).toUpperCase()}
-                                            </div>
-                                            <div>
-                                                <p className="font-bold text-slate-900">{selectedLead.name}</p>
-                                                <p className="text-xs text-slate-500">{selectedLead.company}</p>
-                                            </div>
-                                        </div>
-                                        <div className="space-y-2 text-sm">
-                                            <div className="flex items-center gap-2 text-slate-600">
-                                                <Mail className="w-4 h-4" /> {selectedLead.email}
-                                            </div>
-                                            {selectedLead.phone && (
-                                                <div className="flex items-center gap-2 text-slate-600">
-                                                    <Phone className="w-4 h-4" /> {selectedLead.phone}
-                                                </div>
-                                            )}
-                                            <div className="flex items-center gap-2 text-slate-600">
-                                                <Briefcase className="w-4 h-4" /> {selectedLead.source}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Actions in Detail View */}
-                                    <button 
-                                        onClick={() => {
-                                            setEmailCompose({to: selectedLead.email, name: selectedLead.name, subject: 'Re: Project', body: `Hi ${selectedLead.name},\n\n`});
-                                        }}
-                                        className="w-full py-2 bg-indigo-50 text-indigo-700 font-bold rounded-lg hover:bg-indigo-100 flex items-center justify-center gap-2"
-                                    >
-                                        <Mail className="w-4 h-4" /> Reply via Email
-                                    </button>
-
-                                    {/* AI Analysis Section */}
-                                    <div className="bg-white border border-indigo-100 rounded-xl overflow-hidden shadow-sm">
-                                        <div className="bg-indigo-50 px-4 py-3 border-b border-indigo-100 flex items-center gap-2">
-                                            <Sparkles className="w-4 h-4 text-indigo-600" />
-                                            <span className="text-xs font-bold text-indigo-800 uppercase tracking-wider">AI Insight</span>
-                                        </div>
-                                        <div className="p-4 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
-                                            {selectedLead.notes || "No analysis available."}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="pt-6 border-t border-slate-100 flex gap-3">
-                                    <button 
-                                        onClick={() => deleteLead(selectedLead.id)}
-                                        className="flex-1 py-3 border border-red-200 text-red-600 rounded-xl font-bold hover:bg-red-50 flex items-center justify-center gap-2"
-                                    >
-                                        <Trash2 className="w-4 h-4" /> Discard
-                                    </button>
-                                    <button 
-                                        onClick={() => { convertToOpportunity(selectedLead); setSelectedLead(null); }}
-                                        className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-lg flex items-center justify-center gap-2"
-                                    >
-                                        <Briefcase className="w-4 h-4" /> Create Estimate
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
                 </div>
             )}
         </div>
