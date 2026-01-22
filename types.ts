@@ -62,6 +62,7 @@ export interface ProjectEstimate {
   estimator?: string;
   dateCreated: string;
   deliveryDate?: string;
+  expirationDate?: string;
   awardedDate?: string;
   startDate?: string;
   completionDate?: string;

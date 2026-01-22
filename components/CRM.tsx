@@ -114,9 +114,10 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
             setLeads(finalLeads);
             setAnalysisProgress('');
             alert(`Sync Complete. Processed ${data.length} items.`);
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
-            alert("Failed to fetch leads. Ensure Client ID is configured in Settings.");
+            const msg = error.message || "Unknown error";
+            alert(`Failed to fetch leads. Ensure Client ID is configured in Settings.\n\nDetails: ${msg}`);
         } finally {
             setIsLoading(false);
             setAnalysisProgress('');
@@ -319,6 +320,12 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
                             <div>
                                 <label className="text-xs font-bold text-slate-500 uppercase">Tenant ID</label>
                                 <input className="w-full border p-2 rounded text-sm mt-1" value={tenantId} onChange={(e) => setTenantId(e.target.value)} />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">Redirect URI (Use in Azure)</label>
+                                <div className="w-full border p-2 rounded text-xs mt-1 bg-slate-100 text-slate-600 break-all select-all">
+                                    {window.location.origin}
+                                </div>
                             </div>
                         </div>
                         <div className="p-4 border-t border-slate-100 flex justify-end gap-2 bg-slate-50">
