@@ -11,7 +11,7 @@ interface CRMProps {
     opportunities: any[];
     setOpportunities: (opps: any[]) => void;
     projects?: ProjectEstimate[];
-    setProjects?: (projects: ProjectEstimate[]) => void;
+    setProjects?: React.Dispatch<React.SetStateAction<ProjectEstimate[]>>;
 }
 
 // Pre-defined templates for automation
@@ -140,7 +140,8 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
             items: [],
             contractValue: 0
         };
-        setProjects([...projects, newProject]);
+        // Fix: Use functional update correctly typed
+        setProjects(prev => [...prev, newProject]);
         setLeads(leads.filter(l => l.id !== lead.id));
         setActiveTab('pipeline');
     };
@@ -153,12 +154,11 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
             
             // Update project last contact date if associated
             if (emailCompose.projectId && setProjects) {
-                const updated = projects.map(p => 
+                setProjects(prev => prev.map(p => 
                     p.id === emailCompose.projectId 
                     ? { ...p, lastContactDate: new Date().toISOString() } 
                     : p
-                );
-                setProjects(updated);
+                ));
             }
 
             alert(`Email sent to ${emailCompose.to}`);
@@ -238,7 +238,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
         e.preventDefault();
         const projectId = e.dataTransfer.getData("projectId");
         if (projectId && setProjects) {
-            const updatedProjects = projects.map(p => {
+            setProjects(prev => prev.map(p => {
                 if (p.id === projectId) {
                     const today = new Date().toISOString();
                     const updated = { ...p, status: newStatus };
@@ -247,8 +247,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
                     return updated;
                 }
                 return p;
-            });
-            setProjects(updatedProjects);
+            }));
         }
     };
 
@@ -482,8 +481,8 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
                                                     </button>
                                                     {setProjects && (
                                                         <>
-                                                            <button onClick={() => { if(confirm("Mark Won?")) setProjects(projects.map(proj => proj.id === p.id ? {...proj, status: 'Won'} : proj)); }} className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded" title="Won"><CheckCircle className="w-4 h-4"/></button>
-                                                            <button onClick={() => { if(confirm("Mark Lost?")) setProjects(projects.map(proj => proj.id === p.id ? {...proj, status: 'Lost'} : proj)); }} className="p-1.5 text-red-400 hover:bg-red-50 rounded" title="Lost"><XCircle className="w-4 h-4"/></button>
+                                                            <button onClick={() => { if(confirm("Mark Won?")) setProjects(prev => prev.map(proj => proj.id === p.id ? {...proj, status: 'Won'} : proj)); }} className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded" title="Won"><CheckCircle className="w-4 h-4"/></button>
+                                                            <button onClick={() => { if(confirm("Mark Lost?")) setProjects(prev => prev.map(proj => proj.id === p.id ? {...proj, status: 'Lost'} : proj)); }} className="p-1.5 text-red-400 hover:bg-red-50 rounded" title="Lost"><XCircle className="w-4 h-4"/></button>
                                                         </>
                                                     )}
                                                 </div>
