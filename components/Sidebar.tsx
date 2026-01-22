@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { ViewState, User } from '../types';
 import { LayoutDashboard, FileText, Database, FolderOpen, X, LogOut, Users, Download, FileDiff, BarChart2, Upload, Cloud } from 'lucide-react';
@@ -109,8 +110,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isO
         />
       )}
 
-      {/* Sidebar Drawer */}
-      <div className={`fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 border-r border-slate-800 transform transition-transform duration-300 ease-in-out md:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'} flex flex-col shadow-2xl md:shadow-none`}>
+      {/* Sidebar Drawer - Layout Fixed: md:relative to participate in flex flow */}
+      <div className={`fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 border-r border-slate-800 transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'} flex flex-col shadow-2xl md:shadow-none h-full`}>
         
         {/* Header / Logo */}
         <div className="h-24 flex items-center justify-between px-6 shrink-0 border-b border-slate-800/50">
@@ -260,7 +261,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isO
                     <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
                     <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wide">Miami-Dade</p>
                 </div>
-                <span className="text-[10px] text-slate-600">v1.2</span>
+                <span className="text-[10px] text-slate-600">v1.3</span>
             </div>
             <p className="text-[10px] text-slate-500 mt-1">NEC 2023 Compliant</p>
           </div>
