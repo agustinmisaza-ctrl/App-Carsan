@@ -85,6 +85,20 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         }
     };
 
+    const handleReconnect = async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+            // Force interactive login
+            const results = await searchSharePointSites("", true);
+            setSites(results);
+        } catch (e: any) {
+            setError(e.message);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     const handleSaveSettings = () => {
         setStoredTenantId(tenantId.trim());
         setStoredClientId(clientId.trim());
@@ -335,7 +349,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                                     <button 
                                         key={site.id} 
                                         onClick={() => handleSelectSite(site)}
-                                        className="text-left p-4 border border-slate-200 rounded-xl hover:bg-blue-50 transition-all group flex justify-between items-center"
+                                        className="text-left p-4 border border-slate-200 rounded-xl hover:bg-blue-50 transition-all group flex items-center justify-between"
                                     >
                                         <div>
                                             <p className="font-bold text-slate-900 group-hover:text-blue-700">{site.displayName}</p>
@@ -349,7 +363,10 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                                             <Database className="w-6 h-6 text-slate-400" />
                                         </div>
                                         <p className="text-slate-500 text-sm mb-4">No se encontraron sitios. Verifica tus permisos.</p>
-                                        <button onClick={() => handleSearchSites(false)} className="text-blue-600 font-bold text-sm hover:underline">Actualizar Sitios</button>
+                                        <div className="flex justify-center gap-4">
+                                            <button onClick={() => handleSearchSites(false)} className="text-blue-600 font-bold text-sm hover:underline">Actualizar Sitios</button>
+                                            <button onClick={handleReconnect} className="text-slate-600 font-bold text-sm hover:underline flex items-center gap-1"><LogIn className="w-4 h-4"/> Reconectar Cuenta</button>
+                                        </div>
                                     </div>
                                 )}
                             </div>

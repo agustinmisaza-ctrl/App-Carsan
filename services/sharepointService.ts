@@ -32,9 +32,9 @@ export interface SPDriveItem {
     webUrl: string;
 }
 
-export const searchSharePointSites = async (query: string): Promise<SPSite[]> => {
+export const searchSharePointSites = async (query: string, forceAuth: boolean = false): Promise<SPSite[]> => {
     try {
-        const token = await getGraphToken(['Sites.Read.All']);
+        const token = await getGraphToken(['Sites.Read.All'], forceAuth);
         const q = query ? `?search=${query}` : '?search=*';
         const response = await fetch(`https://graph.microsoft.com/v1.0/sites${q}`, {
             headers: { Authorization: `Bearer ${token}` }
