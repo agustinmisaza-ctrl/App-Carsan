@@ -402,7 +402,7 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
                             <p className="text-slate-400 text-[10px] mt-1">{followUpProjects.length} proposals waiting</p>
                         </div>
                         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                            <p className="text-slate-400 text-xs font-bold uppercase tracking-wider">Stale Proposals (>7 Days)</p>
+                            <p className="text-slate-400 text-xs font-bold uppercase tracking-wider">Stale Proposals (&gt;7 Days)</p>
                             <div className="flex items-end justify-between mt-1">
                                 <p className={`text-2xl font-bold ${staleCount > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{staleCount}</p>
                                 {staleCount > 0 && <AlertTriangle className="w-5 h-5 text-red-500 mb-1" />}
