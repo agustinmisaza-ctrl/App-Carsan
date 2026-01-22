@@ -36,9 +36,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
     const [searchTerm, setSearchTerm] = useState('');
     const [analysisProgress, setAnalysisProgress] = useState('');
     
-    // Detailed View State
-    const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
-
     // Settings State
     const [showSettings, setShowSettings] = useState(false);
     const [clientId, setClientId] = useState(getStoredClientId() || '');
@@ -47,8 +44,6 @@ export const CRM: React.FC<CRMProps> = ({ leads, setLeads, projects = [], setPro
     // Email & Manual Entry State
     const [emailCompose, setEmailCompose] = useState<{to: string, name: string, subject: string, body: string, projectId?: string} | null>(null);
     const [isSendingEmail, setIsSendingEmail] = useState(false);
-    const [showAddLead, setShowAddLead] = useState(false);
-    const [newLead, setNewLead] = useState<Partial<Lead>>({ name: '', email: '', company: '', phone: '', source: 'Manual', notes: '' });
 
     // Automation State
     const [selectedTemplate, setSelectedTemplate] = useState<keyof typeof EMAIL_TEMPLATES>('check-in');
