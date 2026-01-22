@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { Search, Database, Loader2, Link as LinkIcon, CheckCircle, RefreshCw, ChevronRight, LayoutList, Settings2, Save, Filter, Settings, LogIn, FileText, Briefcase } from 'lucide-react';
-import { searchSharePointSites, getSharePointLists, getListColumns, fetchMappedListItems, fetchMappedTickets, SPSite, SPList, SPColumn } from '../services/sharepointService';
-import { ProjectMapping, TicketMapping, ProjectEstimate, MaterialItem, ServiceTicket, PurchaseRecord } from '../types';
+import { Search, Database, Loader2, Link as LinkIcon, CheckCircle, RefreshCw, ChevronRight, LayoutList, Settings2, Save, Filter, Settings, LogIn, FileText, Briefcase, Users } from 'lucide-react';
+import { searchSharePointSites, getSharePointLists, getListColumns, fetchMappedListItems, fetchMappedTickets, fetchMappedLeads, SPSite, SPList, SPColumn } from '../services/sharepointService';
+import { ProjectMapping, TicketMapping, LeadMapping, ProjectEstimate, MaterialItem, ServiceTicket, PurchaseRecord, Lead } from '../types';
 import { getStoredTenantId, setStoredTenantId, getStoredClientId, setStoredClientId } from '../services/emailIntegration';
 
 interface SharePointConnectProps {
@@ -13,10 +13,12 @@ interface SharePointConnectProps {
     setTickets?: (tickets: ServiceTicket[]) => void;
     purchases?: PurchaseRecord[];
     setPurchases?: (purchases: PurchaseRecord[]) => void;
+    leads?: Lead[];
+    setLeads?: (leads: Lead[]) => void;
 }
 
-export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, setProjects, materials, tickets, setTickets, purchases, setPurchases }) => {
-    const [importMode, setImportMode] = useState<'projects' | 'tickets'>('projects');
+export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, setProjects, materials, tickets, setTickets, purchases, setPurchases, leads, setLeads }) => {
+    const [importMode, setImportMode] = useState<'projects' | 'tickets' | 'leads'>('projects');
     const [step, setStep] = useState<0 | 1 | 2>(0); 
     const [sites, setSites] = useState<SPSite[]>([]);
     const [lists, setLists] = useState<SPList[]>([]);
@@ -41,6 +43,13 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
         const saved = localStorage.getItem('carsan_sp_ticket_mapping');
         return saved ? JSON.parse(saved) : {
             title: 'Title', client: '', status: '', amount: '', dateCreated: '', projectName: ''
+        };
+    });
+
+    const [leadMapping, setLeadMapping] = useState<LeadMapping>(() => {
+        const saved = localStorage.getItem('carsan_sp_lead_mapping');
+        return saved ? JSON.parse(saved) : {
+            name: 'Title', email: '', phone: '', company: '', notes: ''
         };
     });
 
@@ -117,7 +126,7 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                     if (name.includes('area')) autoMap.area = c.name;
                 });
                 setProjectMapping(autoMap);
-            } else {
+            } else if (importMode === 'tickets') {
                  const autoMap = { ...ticketMapping };
                  cols.forEach(c => {
                     const name = c.displayName.toLowerCase();
@@ -128,6 +137,17 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                     if (name.includes('proyecto') || name.includes('project')) autoMap.projectName = c.name;
                  });
                  setTicketMapping(autoMap);
+            } else if (importMode === 'leads') {
+                const autoMap = { ...leadMapping };
+                cols.forEach(c => {
+                    const name = c.displayName.toLowerCase();
+                    if (name.includes('nombre') || name.includes('name') || name.includes('contacto')) autoMap.name = c.name;
+                    if (name.includes('email') || name.includes('correo')) autoMap.email = c.name;
+                    if (name.includes('telefono') || name.includes('phone') || name.includes('movil')) autoMap.phone = c.name;
+                    if (name.includes('empresa') || name.includes('company')) autoMap.company = c.name;
+                    if (name.includes('nota') || name.includes('descrip')) autoMap.notes = c.name;
+                });
+                setLeadMapping(autoMap);
             }
             setStep(2);
         } catch (e: any) {
@@ -146,12 +166,27 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                 const cloudProjects = await fetchMappedListItems(selectedSite.id, selectedList.id, projectMapping);
                 setProjects(cloudProjects);
                 alert(`Sincronización exitosa. Se cargaron ${cloudProjects.length} proyectos.`);
-            } else {
+            } else if (importMode === 'tickets') {
                 if (!setTickets) return;
                 localStorage.setItem('carsan_sp_ticket_mapping', JSON.stringify(ticketMapping));
                 const cloudTickets = await fetchMappedTickets(selectedSite.id, selectedList.id, ticketMapping, projects);
                 setTickets(cloudTickets);
                 alert(`Sincronización exitosa. Se cargaron ${cloudTickets.length} Change Orders.`);
+            } else if (importMode === 'leads') {
+                if (!setLeads) return;
+                localStorage.setItem('carsan_sp_lead_mapping', JSON.stringify(leadMapping));
+                const cloudLeads = await fetchMappedLeads(selectedSite.id, selectedList.id, leadMapping);
+                
+                // Merge logic to avoid duplicates based on Email
+                if (leads) {
+                    const existingEmails = new Set(leads.map(l => l.email.toLowerCase()));
+                    const newLeads = cloudLeads.filter(l => !l.email || !existingEmails.has(l.email.toLowerCase()));
+                    setLeads([...leads, ...newLeads]);
+                    alert(`Sincronización exitosa. ${newLeads.length} nuevos contactos añadidos.`);
+                } else {
+                    setLeads(cloudLeads);
+                    alert(`Sincronización exitosa. Se cargaron ${cloudLeads.length} contactos.`);
+                }
             }
         } catch (e: any) {
             setError("Error durante la sincronización: " + e.message);
@@ -236,18 +271,24 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                 )}
 
                 {/* Import Mode Toggle */}
-                <div className="flex bg-slate-100 p-1 rounded-xl mb-6 w-full md:w-fit">
+                <div className="flex bg-slate-100 p-1 rounded-xl mb-6 w-full md:w-fit overflow-x-auto">
                     <button 
                         onClick={() => { setImportMode('projects'); setStep(0); }}
-                        className={`flex-1 md:flex-none px-6 py-2 rounded-lg text-sm font-bold flex items-center gap-2 justify-center transition-all ${importMode === 'projects' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                        className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 justify-center transition-all whitespace-nowrap ${importMode === 'projects' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
                     >
                         <Briefcase className="w-4 h-4" /> Import Projects
                     </button>
                     <button 
                         onClick={() => { setImportMode('tickets'); setStep(0); }}
-                        className={`flex-1 md:flex-none px-6 py-2 rounded-lg text-sm font-bold flex items-center gap-2 justify-center transition-all ${importMode === 'tickets' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                        className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 justify-center transition-all whitespace-nowrap ${importMode === 'tickets' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
                     >
                         <FileText className="w-4 h-4" /> Import Change Orders
+                    </button>
+                    <button 
+                        onClick={() => { setImportMode('leads'); setStep(0); }}
+                        className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 justify-center transition-all whitespace-nowrap ${importMode === 'leads' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                        <Users className="w-4 h-4" /> Import Clients/Leads
                     </button>
                 </div>
 
@@ -343,14 +384,16 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                                         <div>
                                             <p className="text-sm font-bold text-emerald-800">Lista: {selectedList?.displayName}</p>
                                             <p className="text-[10px] text-emerald-600 uppercase tracking-wider">
-                                                {importMode === 'projects' ? 'Filtro AREA = USA activo' : 'Mapeo de Change Orders'}
+                                                {importMode === 'projects' ? 'Filtro AREA = USA activo' : 
+                                                 importMode === 'tickets' ? 'Mapeo de Change Orders' : 
+                                                 'Mapeo de Contactos/Leads'}
                                             </p>
                                         </div>
                                     </div>
                                     <button onClick={() => setStep(1)} className="text-xs font-bold text-emerald-700 underline">Cambiar Lista</button>
                                 </div>
 
-                                {importMode === 'projects' ? (
+                                {importMode === 'projects' && (
                                     <div className="space-y-3">
                                         <MappingRow label="Columna de AREA (Filtro)" value={projectMapping.area} onChange={(v) => setProjectMapping({...projectMapping, area: v})} isFilter={true} />
                                         <div className="h-px bg-slate-100 my-4"></div>
@@ -361,7 +404,9 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                                         <MappingRow label="Dirección / Ubicación" value={projectMapping.address} onChange={(v) => setProjectMapping({...projectMapping, address: v})} />
                                         <MappingRow label="Fecha de Creación" value={projectMapping.dateCreated} onChange={(v) => setProjectMapping({...projectMapping, dateCreated: v})} />
                                     </div>
-                                ) : (
+                                )}
+                                
+                                {importMode === 'tickets' && (
                                     <div className="space-y-3">
                                         <MappingRow label="Descripción / Título" value={ticketMapping.title} onChange={(v) => setTicketMapping({...ticketMapping, title: v})} />
                                         <MappingRow label="Cliente" value={ticketMapping.client} onChange={(v) => setTicketMapping({...ticketMapping, client: v})} />
@@ -372,13 +417,25 @@ export const SharePointConnect: React.FC<SharePointConnectProps> = ({ projects, 
                                     </div>
                                 )}
 
+                                {importMode === 'leads' && (
+                                    <div className="space-y-3">
+                                        <MappingRow label="Nombre Contacto" value={leadMapping.name} onChange={(v) => setLeadMapping({...leadMapping, name: v})} />
+                                        <MappingRow label="Email" value={leadMapping.email} onChange={(v) => setLeadMapping({...leadMapping, email: v})} />
+                                        <MappingRow label="Teléfono" value={leadMapping.phone} onChange={(v) => setLeadMapping({...leadMapping, phone: v})} />
+                                        <MappingRow label="Empresa" value={leadMapping.company} onChange={(v) => setLeadMapping({...leadMapping, company: v})} />
+                                        <MappingRow label="Notas / Detalles" value={leadMapping.notes} onChange={(v) => setLeadMapping({...leadMapping, notes: v})} />
+                                    </div>
+                                )}
+
                                 <div className="pt-8 flex justify-end">
                                     <button 
                                         onClick={handleSaveMappingAndSync}
                                         className="bg-slate-900 text-white px-8 py-3 rounded-xl font-bold hover:bg-slate-800 flex items-center gap-3 shadow-lg"
                                     >
                                         <Save className="w-5 h-5" /> 
-                                        {importMode === 'projects' ? 'Importar Proyectos' : 'Importar Change Orders'}
+                                        {importMode === 'projects' ? 'Importar Proyectos' : 
+                                         importMode === 'tickets' ? 'Importar Change Orders' : 
+                                         'Importar Clientes/Leads'}
                                     </button>
                                 </div>
                             </div>

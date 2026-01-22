@@ -1,25 +1,25 @@
 
-export enum ViewState {
-  DASHBOARD = 'DASHBOARD',
-  PROJECTS = 'PROJECTS',
-  ESTIMATE_NEW = 'ESTIMATE_NEW',
-  DATABASE = 'DATABASE',
-  CRM = 'CRM',
-  SERVICE = 'SERVICE',
-  PRICE_ANALYSIS = 'PRICE_ANALYSIS',
-  CLOUD_DB = 'CLOUD_DB'
-}
-
 export type UserRole = 'admin' | 'estimator' | 'technician';
 
 export interface User {
   id: string;
   username: string;
+  password?: string;
   name: string;
   role: UserRole;
   avatarInitials: string;
   mustChangePassword?: boolean;
-  password?: string;
+}
+
+export enum ViewState {
+  DASHBOARD = 'DASHBOARD',
+  CRM = 'CRM',
+  PROJECTS = 'PROJECTS',
+  ESTIMATE_NEW = 'ESTIMATE_NEW',
+  SERVICE = 'SERVICE',
+  PRICE_ANALYSIS = 'PRICE_ANALYSIS',
+  DATABASE = 'DATABASE',
+  CLOUD_DB = 'CLOUD_DB'
 }
 
 export interface MaterialItem {
@@ -44,12 +44,12 @@ export interface EstimateLineItem {
 }
 
 export interface ProjectFile {
-    id: string;
-    name: string;
-    category: 'Plan' | 'Permit' | 'Inspection' | 'As-Built' | 'Other';
-    uploadDate: string;
-    fileData?: string;
-    fileType?: string;
+  id: string;
+  name: string;
+  category: 'Plan' | 'Other';
+  uploadDate: string;
+  fileData: string;
+  fileType: string;
 }
 
 export interface ProjectEstimate {
@@ -62,52 +62,25 @@ export interface ProjectEstimate {
   estimator?: string;
   dateCreated: string;
   deliveryDate?: string;
-  expirationDate?: string;
   awardedDate?: string;
   startDate?: string;
   completionDate?: string;
-  lastContactDate?: string; // New field for CRM automation
   status: 'Draft' | 'Sent' | 'Won' | 'Lost' | 'Ongoing' | 'Completed' | 'Finalized';
-  contractValue?: number;
   laborRate: number;
   items: EstimateLineItem[];
-  blueprintImage?: string;
-  projectImage?: string;
-  quantityTableFile?: string;
   projectFiles?: ProjectFile[];
-  scheduleFile?: string;
-  scheduleMilestones?: string;
-  followUpDate?: string;
-}
-
-export interface ProjectMapping {
-  name: string;
-  client: string;
-  status: string;
-  contractValue: string;
-  address: string;
-  estimator: string;
-  dateCreated: string;
-  awardedDate: string;
-  area: string; // Nueva columna para filtrado
-}
-
-export interface TicketMapping {
-  title: string;       // Maps to note/description
-  client: string;
-  status: string;
-  amount: string;      // Total value
-  dateCreated: string;
-  projectName: string; // To link with existing project
+  contractValue?: number;
+  lastContactDate?: string;
+  blueprintImage?: string;
 }
 
 export interface ServiceTicket {
   id: string;
-  type: string;
+  type: 'Change Order' | 'Service Call';
   projectId?: string;
   clientName: string;
   address: string;
-  status: 'Scheduled' | 'Sent' | 'Authorized' | 'Denied' | 'Completed';
+  status: 'Sent' | 'Authorized' | 'Denied' | 'Completed' | 'Scheduled' | 'Pending';
   technician: string;
   dateCreated: string;
   items: EstimateLineItem[];
@@ -119,21 +92,13 @@ export interface ServiceTicket {
 export interface Lead {
   id: string;
   name: string;
-  company?: string;
+  company: string;
   email: string;
-  phone?: string;
+  phone: string;
   source: string;
   status: string;
   notes?: string;
   dateAdded: string;
-}
-
-export interface AnalysisResult {
-  items: {
-    description: string;
-    count: number;
-    reasoning: string;
-  }[];
 }
 
 export interface PurchaseRecord {
@@ -144,7 +109,6 @@ export interface PurchaseRecord {
   itemDescription: string;
   quantity: number;
   unitCost: number;
-  tax?: number;
   totalCost: number;
   supplier: string;
   projectName: string;
@@ -152,38 +116,62 @@ export interface PurchaseRecord {
   source?: string;
 }
 
-export interface VarianceItem {
-  id: string;
-  projectName: string;
-  itemName: string;
-  estimatedQty: number;
-  estimatedUnitCost: number;
-  purchasedQty: number;
-  avgPurchasedCost: number;
-  totalEstimated: number;
-  totalPurchased: number;
-  costVariance: number; 
-  qtyVariance: number; 
-  status: 'OK' | 'Over Budget' | 'Over Quantity' | 'Critical' | 'Unplanned';
-}
-
-export interface AuditLog {
-    id: string;
-    userId: string;
-    userName: string;
-    action: string;
-    details: string;
-    timestamp: string;
+export interface AnalysisResult {
+  items: {
+    description: string;
+    count: number;
+    reasoning: string;
+  }[];
 }
 
 export interface SupplierStatus {
     name: string;
-    isBlocked: boolean; // True if > 60 days past due
-    daysPastDue?: number;
+    isBlocked: boolean;
 }
 
 export interface ShoppingItem {
     id: string;
     name: string;
     quantity: number;
+}
+
+export interface VarianceItem {
+    description: string;
+    estQty: number;
+    estUnit: number;
+    estTotal: number;
+    actQty: number;
+    actUnit: number;
+    actTotal: number;
+    variance: number;
+    type: 'Match' | 'Unplanned';
+}
+
+export interface ProjectMapping {
+  name: string;
+  client: string;
+  status: string;
+  contractValue: string;
+  address: string;
+  estimator: string;
+  dateCreated: string;
+  awardedDate: string;
+  area: string; 
+}
+
+export interface TicketMapping {
+  title: string;       
+  client: string;
+  status: string;
+  amount: string;      
+  dateCreated: string;
+  projectName: string; 
+}
+
+export interface LeadMapping {
+  name: string;    
+  email: string;   
+  phone: string;   
+  company: string; 
+  notes: string;   
 }
