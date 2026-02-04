@@ -1,9 +1,25 @@
+
 import { PurchaseRecord } from "../types";
 
-// Helper to parse currency strings like " $35,953.80 "
-export const parseCurrency = (str: string): number => {
-    if (!str) return 0;
-    const clean = str.toString().replace(/[$, ]/g, '').trim();
+// Helper to parse currency strings like " $35,953.80 " or "3,000"
+export const parseCurrency = (val: any): number => {
+    if (val === null || val === undefined) return 0;
+    if (typeof val === 'number') return val;
+    
+    const str = String(val);
+    // Remove $, commas, spaces, quotes, and non-breaking spaces
+    const clean = str.replace(/[$,\s"']/g, '').trim();
+    return parseFloat(clean) || 0;
+};
+
+// Helper to parse quantities that might have commas (e.g., "3,000")
+export const parseNumber = (val: any): number => {
+    if (val === null || val === undefined) return 0;
+    if (typeof val === 'number') return val;
+    
+    const str = String(val);
+    // Remove commas, quotes, spaces
+    const clean = str.replace(/[, "'\s]/g, '').trim();
     return parseFloat(clean) || 0;
 };
 
@@ -20,7 +36,7 @@ export const robustParseDate = (val: any): Date => {
     }
 
     if (typeof val === 'string') {
-        const cleanVal = val.trim();
+        const cleanVal = val.trim().replace(/['"]/g, ''); // Remove quotes
         
         // Try ISO format (fastest)
         const isoDate = new Date(cleanVal);
@@ -33,7 +49,7 @@ export const robustParseDate = (val: any): Date => {
             const p1 = parseInt(parts[1]);
             const p2 = parseInt(parts[2]);
 
-            // If p0 > 12, it must be DD/MM/YYYY
+            // If p0 > 12, it must be DD/MM/YYYY (e.g. 21/01/2025)
             if (p0 > 12) return new Date(p2, p1 - 1, p0);
             // Default to MM/DD/YYYY for standard US compatibility
             return new Date(p2, p0 - 1, p1);
@@ -67,7 +83,7 @@ export const parseCSVLine = (line: string): string[] => {
 // Helper to normalize supplier names
 export const normalizeSupplier = (name: string): string => {
     if (!name) return 'Unknown';
-    const clean = name.trim();
+    const clean = name.trim().replace(/^"|"$/g, '');
     if (['CES', 'CED', 'G&G', 'ABC'].includes(clean.toUpperCase())) return clean.toUpperCase();
     return clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase();
 };
@@ -81,30 +97,32 @@ export const processPurchaseData = (csvContent: string): PurchaseRecord[] => {
         if (!line) continue;
 
         const cols = parseCSVLine(line);
-        if (cols.length < 10) continue;
+        if (cols.length < 5) continue; // Basic validation
 
         try {
             const dateObj = robustParseDate(cols[0]);
-            const quantityStr = cols[4].replace(/,/g, '').trim();
             
-            let rawSupplier = cols[8].trim().replace(/^"|"$/g, '');
+            // Clean up quoted strings for other fields
+            const cleanStr = (s: string) => s ? s.trim().replace(/^"|"$/g, '') : '';
+
+            let rawSupplier = cleanStr(cols[8]);
             let supplier = normalizeSupplier(rawSupplier);
             
             if (rawSupplier.toLowerCase().includes('world')) supplier = 'World Electric';
             if (rawSupplier.toLowerCase().includes('manhattan')) supplier = 'Manhattan';
 
             const record: PurchaseRecord = {
-                id: `po-${cols[1]}-${i}`,
+                id: `po-${cleanStr(cols[1])}-${i}`,
                 date: dateObj.toISOString(),
-                poNumber: cols[1].trim(),
-                brand: cols[2].trim(),
-                itemDescription: cols[3].trim().replace(/^"|"$/g, ''),
-                quantity: parseFloat(quantityStr) || 0,
+                poNumber: cleanStr(cols[1]),
+                brand: cleanStr(cols[2]),
+                itemDescription: cleanStr(cols[3]),
+                quantity: parseNumber(cols[4]),
                 unitCost: parseCurrency(cols[5]),
                 totalCost: parseCurrency(cols[7]),
                 supplier: supplier,
-                projectName: cols[9].trim(),
-                type: cols[10]?.trim() || 'Material'
+                projectName: cleanStr(cols[9]),
+                type: cleanStr(cols[10]) || 'Material'
             };
             records.push(record);
         } catch (e) {}

@@ -5,7 +5,7 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, L
 import { Search, TrendingUp, DollarSign, Filter, Award, Upload, Loader2, FileSpreadsheet, LayoutDashboard, Database, X, CheckCircle, Sparkles, AlertTriangle, Trash2, Plus, ShoppingCart, RefreshCw, Calendar, Download, Settings, FileText, ArrowRightLeft, Percent, ArrowUpRight, ArrowDownRight, Globe, ExternalLink, Cloud, Link as LinkIcon, Save } from 'lucide-react';
 import { extractInvoiceData, fetchLiveWebPrices } from '../services/geminiService';
 import * as XLSX from 'xlsx';
-import { parseCurrency, normalizeSupplier, robustParseDate } from '../utils/purchaseData';
+import { parseCurrency, parseNumber, normalizeSupplier, robustParseDate } from '../utils/purchaseData';
 import { MIAMI_STANDARD_PRICES } from '../utils/miamiStandards';
 import { fetchQuickBooksBills, getZapierWebhookUrl, setZapierWebhookUrl } from '../services/quickbooksService';
 import { searchSharePointSites, getSiteDrive, searchExcelFiles, downloadFileContent, SPSite, SPDriveItem } from '../services/sharepointService';
@@ -358,15 +358,24 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
           const worksheet = workbook.Sheets[sheetName];
           const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
-          const newRecords = jsonData.map((row: any, idx) => ({
+          const cleanData = jsonData.map((row: any) => {
+              const newRow: any = {};
+              Object.keys(row).forEach(key => {
+                  const cleanKey = key.trim().replace(/^[\uFEFF\uFFFE]/, '');
+                  newRow[cleanKey] = row[key];
+              });
+              return newRow;
+          });
+
+          const newRecords = cleanData.map((row: any, idx) => ({
               id: `sp-${Date.now()}-${idx}`,
               date: robustParseDate(row['Date'] || row['Fecha']).toISOString(),
               poNumber: String(row['Purchase Order #'] || row['PO'] || ''),
               brand: String(row['Brand'] || 'N/A'),
               itemDescription: String(row['Item'] || row['Description'] || ''),
-              quantity: Number(row['Quantity'] || row['Qty'] || 0),
-              unitCost: parseCurrency(String(row['Unit Cost'] || row['Price'] || 0)),
-              totalCost: parseCurrency(String(row['Total'] || 0)),
+              quantity: parseNumber(row['Quantity'] || row['Qty'] || 0),
+              unitCost: parseCurrency(row['Unit Cost'] || row['Price'] || 0),
+              totalCost: parseCurrency(row['Total'] || 0),
               supplier: normalizeSupplier(String(row['Supplier'] || row['Vendor'] || '')),
               projectName: String(row['Project'] || 'Inventory'),
               type: 'Material'
@@ -374,8 +383,6 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
 
           if (setPurchases) {
               setPurchases(prev => {
-                  // Basic dup check by comparing content hash or just ID if stable
-                  // Here we just append for simplicity, in real app consider upsert
                   return [...prev, ...newRecords];
               });
               showNotification('success', `Successfully imported ${newRecords.length} items from SharePoint.`);
@@ -1182,20 +1189,33 @@ export const PriceAnalysis: React.FC<PriceAnalysisProps> = ({ purchases = [], se
                               reader.onload = (event) => {
                                   const data = event.target?.result;
                                   const workbook = XLSX.read(data, { type: 'array' });
-                                  const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-                                  const newRecords = jsonData.map((row: any, idx) => ({
+                                  const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                                  const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                                  
+                                  // Sanitize keys (Remove BOM and trim)
+                                  const cleanData = jsonData.map((row: any) => {
+                                      const newRow: any = {};
+                                      Object.keys(row).forEach(key => {
+                                          const cleanKey = key.trim().replace(/^[\uFEFF\uFFFE]/, '');
+                                          newRow[cleanKey] = row[key];
+                                      });
+                                      return newRow;
+                                  });
+
+                                  const newRecords = cleanData.map((row: any, idx) => ({
                                       id: `bulk-${Date.now()}-${idx}`,
                                       date: robustParseDate(row['Date']).toISOString(),
                                       poNumber: String(row['Purchase Order #'] || ''),
                                       brand: String(row['Brand'] || 'N/A'),
                                       itemDescription: String(row['Item'] || ''),
-                                      quantity: Number(row['Quantity'] || 0),
-                                      unitCost: parseCurrency(String(row['Unit Cost'] || 0)),
-                                      totalCost: parseCurrency(String(row['Total'] || 0)),
+                                      quantity: parseNumber(row['Quantity'] || 0),
+                                      unitCost: parseCurrency(row['Unit Cost'] || 0),
+                                      totalCost: parseCurrency(row['Total'] || 0),
                                       supplier: normalizeSupplier(String(row['Supplier'] || '')),
                                       projectName: String(row['Project'] || 'Inventory'),
                                       type: 'Material'
-                                  }));
+                                  })).filter(r => r.totalCost > 0 || r.quantity > 0);
+                                  
                                   setPurchases(prev => [...prev, ...newRecords]);
                                   showNotification('success', `Imported ${newRecords.length} items.`);
                               };

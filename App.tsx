@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { ProjectList } from './components/ProjectList';
@@ -13,8 +12,8 @@ import { AIAssistant } from './components/AIAssistant';
 import { User, ViewState, ProjectEstimate, MaterialItem, ServiceTicket, Lead, PurchaseRecord } from './types';
 import { MIAMI_STANDARD_PRICES } from './utils/miamiStandards';
 import { INITIAL_CSV_DATA, processPurchaseData } from './utils/purchaseData';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
-import { Briefcase, TrendingUp, Users, DollarSign, Clock, ArrowUpRight, Activity, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts';
+import { Briefcase, TrendingUp, Users, DollarSign, Clock, ArrowUpRight, Activity, FileText, CheckCircle2, AlertCircle, Plus, Calendar, Hammer, AlertTriangle, Award } from 'lucide-react';
 
 export const App = () => {
     const [user, setUser] = useState<User | null>(null);
@@ -55,54 +54,9 @@ export const App = () => {
     useEffect(() => { localStorage.setItem('carsan_leads', JSON.stringify(leads)); }, [leads]);
     useEffect(() => { localStorage.setItem('carsan_purchases', JSON.stringify(purchases)); }, [purchases]);
 
-    if (!user) {
-        return <Login onLogin={setUser} />;
-    }
+    // --- REAL DASHBOARD DATA CALCULATIONS (Moved BEFORE conditional return) ---
 
-    // --- REAL DASHBOARD DATA CALCULATIONS ---
-
-    // 1. KPI Counts
-    const activeProjectsCount = projects.filter(p => p.status === 'Ongoing').length;
-    const pendingEstimatesCount = projects.filter(p => p.status === 'Sent').length;
-    const newLeadsCount = leads.filter(l => l.status === 'New').length;
-    
-    // 2. Total Contract Value (Won + Ongoing + Completed)
-    const totalRevenue = projects.filter(p => ['Won', 'Ongoing', 'Completed'].includes(p.status))
-                                 .reduce((sum, p) => sum + (p.contractValue || 0), 0);
-
-    // 3. Win Rate Calculation
-    const closedProjects = projects.filter(p => p.status === 'Won' || p.status === 'Lost' || p.status === 'Ongoing' || p.status === 'Completed');
-    const wonProjectsCount = projects.filter(p => ['Won', 'Ongoing', 'Completed'].includes(p.status)).length;
-    const winRate = closedProjects.length > 0 
-        ? Math.round((wonProjectsCount / closedProjects.length) * 100) 
-        : 0;
-
-    // 4. Recent Activity Feed
-    const recentActivity = [
-        ...projects.map(p => ({ 
-            type: 'Project', 
-            name: p.name, 
-            date: p.dateCreated, 
-            status: p.status,
-            details: `Value: $${(p.contractValue || 0).toLocaleString()}`
-        })),
-        ...leads.map(l => ({ 
-            type: 'Lead', 
-            name: l.name, 
-            date: l.dateAdded, 
-            status: l.status,
-            details: l.company
-        })),
-        ...tickets.map(t => ({
-            type: 'Ticket',
-            name: t.clientName,
-            date: t.dateCreated,
-            status: t.status,
-            details: t.type
-        }))
-    ].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 7);
-
-    // 5. Monthly Revenue Chart (Last 6 Months Real Data)
+    // 1. Monthly Revenue Chart (Last 6 Months Real Data) - Memoized Hook
     const monthlyData = useMemo(() => {
         const data = [];
         const today = new Date();
@@ -135,117 +89,309 @@ export const App = () => {
         return data;
     }, [projects]);
 
+    // 2. KPI Counts
+    const activeProjectsCount = projects.filter(p => p.status === 'Ongoing').length;
+    const pendingEstimatesCount = projects.filter(p => p.status === 'Sent').length;
+    const newLeadsCount = leads.filter(l => l.status === 'New').length;
+    
+    // 3. Financial Metrics
+    const currentYear = new Date().getFullYear();
+    
+    // Revenue YTD (Won + Ongoing + Completed in Current Year)
+    const revenueYTD = projects
+        .filter(p => ['Won', 'Ongoing', 'Completed'].includes(p.status))
+        .filter(p => {
+            const d = new Date(p.awardedDate || p.dateCreated);
+            return d.getFullYear() === currentYear;
+        })
+        .reduce((sum, p) => sum + (p.contractValue || 0), 0);
+
+    // Pipeline Value (Sent but not yet Won/Lost)
+    const pipelineValue = projects
+        .filter(p => p.status === 'Sent')
+        .reduce((sum, p) => sum + (p.contractValue || 0), 0);
+
+    // 4. Win Rate Calculation
+    const closedProjects = projects.filter(p => ['Won', 'Lost', 'Ongoing', 'Completed'].includes(p.status));
+    const wonProjectsCount = projects.filter(p => ['Won', 'Ongoing', 'Completed'].includes(p.status)).length;
+    const winRate = closedProjects.length > 0 
+        ? Math.round((wonProjectsCount / closedProjects.length) * 100) 
+        : 0;
+
+    // 5. Project Status Distribution (Pie Chart)
+    const statusCounts = projects.reduce((acc, p) => {
+        const group = ['Won', 'Ongoing'].includes(p.status) ? 'Active/Won' : p.status;
+        acc[group] = (acc[group] || 0) + 1;
+        return acc;
+    }, {} as Record<string, number>);
+
+    const projectStatusData = [
+        { name: 'Draft', value: statusCounts['Draft'] || 0, color: '#94a3b8' }, // Slate 400
+        { name: 'Sent', value: statusCounts['Sent'] || 0, color: '#3b82f6' }, // Blue 500
+        { name: 'Active/Won', value: statusCounts['Active/Won'] || 0, color: '#10b981' }, // Emerald 500
+        { name: 'Completed', value: statusCounts['Completed'] || 0, color: '#6366f1' }, // Indigo 500
+        { name: 'Lost', value: statusCounts['Lost'] || 0, color: '#ef4444' }, // Red 500
+    ].filter(d => d.value > 0);
+
+    // 6. Upcoming Deadlines (Next 14 Days)
+    const upcomingDeadlines = projects
+        .filter(p => (p.status === 'Sent' && p.deliveryDate) || (p.status === 'Ongoing' && p.completionDate))
+        .map(p => {
+            const dateStr = p.status === 'Sent' ? p.deliveryDate! : p.completionDate!;
+            return {
+                id: p.id,
+                name: p.name,
+                client: p.client,
+                date: dateStr,
+                type: p.status === 'Sent' ? 'Quote Expiry' : 'Completion'
+            };
+        })
+        .filter(i => {
+            const d = new Date(i.date).getTime();
+            const now = new Date().getTime();
+            const fourteenDays = now + (14 * 24 * 60 * 60 * 1000);
+            return d >= now && d <= fourteenDays;
+        })
+        .sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+        .slice(0, 5);
+
+    // 7. Pending Service Tickets (Action Items)
+    const pendingTickets = tickets.filter(t => t.status === 'Sent').slice(0, 5);
+
+    // 8. Recent Activity Feed
+    const recentActivity = [
+        ...projects.map(p => ({ 
+            type: 'Project', 
+            name: p.name, 
+            date: p.dateCreated, 
+            status: p.status,
+            details: `Value: $${(p.contractValue || 0).toLocaleString()}`
+        })),
+        ...leads.map(l => ({ 
+            type: 'Lead', 
+            name: l.name, 
+            date: l.dateAdded, 
+            status: l.status,
+            details: l.company
+        })),
+        ...tickets.map(t => ({
+            type: 'Ticket',
+            name: t.clientName,
+            date: t.dateCreated,
+            status: t.status,
+            details: t.type
+        }))
+    ].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 7);
+
+    // --- END DATA CALCULATIONS ---
+
+    if (!user) {
+        return <Login onLogin={setUser} />;
+    }
+
     const renderView = () => {
         switch (currentView) {
             case ViewState.DASHBOARD:
                 return (
                     <div className="p-4 md:p-8 space-y-6">
+                        {/* Header Section */}
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
                             <div>
-                                <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Panel de Control</h1>
-                                <p className="text-slate-500 mt-1">Resumen en tiempo real de tu negocio.</p>
+                                <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
+                                    {new Date().getHours() < 12 ? 'Good Morning' : 'Good Afternoon'}, {user.name.split(' ')[0]}
+                                </h1>
+                                <p className="text-slate-500 mt-1">Here is what's happening with your projects today.</p>
                             </div>
-                            <div className="text-right hidden md:block">
-                                <p className="text-xs font-bold text-slate-400 uppercase">Ingresos Totales (Adjudicados)</p>
-                                <p className="text-2xl font-bold text-emerald-600">${totalRevenue.toLocaleString()}</p>
+                            <div className="flex gap-2">
+                                <button onClick={() => setCurrentView(ViewState.ESTIMATE_NEW)} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-700 flex items-center gap-2 shadow-sm transition-transform active:scale-95">
+                                    <Plus className="w-4 h-4" /> New Estimate
+                                </button>
+                                <button onClick={() => setCurrentView(ViewState.CRM)} className="bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-slate-50 flex items-center gap-2 shadow-sm">
+                                    <Users className="w-4 h-4" /> New Lead
+                                </button>
                             </div>
                         </div>
 
-                        {/* KPI Cards */}
+                        {/* KPI Cards Row */}
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow">
-                                <div className="flex justify-between items-start mb-4">
-                                    <div className="p-2 bg-blue-50 rounded-lg text-blue-600"><Briefcase className="w-5 h-5"/></div>
+                            {/* Revenue YTD */}
+                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between group hover:border-emerald-300 transition-colors">
+                                <div className="flex justify-between items-start mb-2">
+                                    <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600 group-hover:bg-emerald-100 transition-colors"><DollarSign className="w-5 h-5"/></div>
+                                    <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-1 rounded-full uppercase tracking-wide">YTD {currentYear}</span>
                                 </div>
                                 <div>
-                                    <p className="text-slate-500 text-xs font-bold uppercase tracking-wide">Proyectos Activos</p>
-                                    <p className="text-3xl font-bold text-slate-900 mt-1">{activeProjectsCount}</p>
-                                    <p className="text-[10px] text-slate-400 mt-1">En estado 'Ongoing'</p>
-                                </div>
-                            </div>
-                            
-                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow">
-                                <div className="flex justify-between items-start mb-4">
-                                    <div className="p-2 bg-orange-50 rounded-lg text-orange-600"><FileText className="w-5 h-5"/></div>
-                                    {pendingEstimatesCount > 0 && <span className="text-xs font-bold bg-orange-100 text-orange-700 px-2 py-1 rounded-full animate-pulse">Pendientes</span>}
-                                </div>
-                                <div>
-                                    <p className="text-slate-500 text-xs font-bold uppercase tracking-wide">Cotizaciones Enviadas</p>
-                                    <p className="text-3xl font-bold text-slate-900 mt-1">{pendingEstimatesCount}</p>
-                                    <p className="text-[10px] text-slate-400 mt-1">Esperando respuesta</p>
+                                    <p className="text-slate-500 text-xs font-bold uppercase tracking-wide">Revenue (Won)</p>
+                                    <p className="text-2xl font-bold text-slate-900 mt-1">${revenueYTD.toLocaleString()}</p>
                                 </div>
                             </div>
 
-                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow">
-                                <div className="flex justify-between items-start mb-4">
-                                    <div className="p-2 bg-purple-50 rounded-lg text-purple-600"><Users className="w-5 h-5"/></div>
+                            {/* Pipeline Value */}
+                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between group hover:border-blue-300 transition-colors">
+                                <div className="flex justify-between items-start mb-2">
+                                    <div className="p-2 bg-blue-50 rounded-lg text-blue-600 group-hover:bg-blue-100 transition-colors"><TrendingUp className="w-5 h-5"/></div>
+                                    {pendingEstimatesCount > 0 && <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-1 rounded-full">{pendingEstimatesCount} Pending</span>}
                                 </div>
                                 <div>
-                                    <p className="text-slate-500 text-xs font-bold uppercase tracking-wide">Nuevos Leads</p>
-                                    <p className="text-3xl font-bold text-slate-900 mt-1">{newLeadsCount}</p>
-                                    <p className="text-[10px] text-slate-400 mt-1">Sin contactar</p>
+                                    <p className="text-slate-500 text-xs font-bold uppercase tracking-wide">Pipeline Value</p>
+                                    <p className="text-2xl font-bold text-slate-900 mt-1">${pipelineValue.toLocaleString()}</p>
+                                    <p className="text-[10px] text-slate-400 mt-1">Potential Revenue</p>
                                 </div>
                             </div>
 
+                            {/* Active Jobs */}
+                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between group hover:border-indigo-300 transition-colors">
+                                <div className="flex justify-between items-start mb-2">
+                                    <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600 group-hover:bg-indigo-100 transition-colors"><Hammer className="w-5 h-5"/></div>
+                                </div>
+                                <div>
+                                    <p className="text-slate-500 text-xs font-bold uppercase tracking-wide">Active Jobs</p>
+                                    <p className="text-2xl font-bold text-slate-900 mt-1">{activeProjectsCount}</p>
+                                    <p className="text-[10px] text-slate-400 mt-1">Currently in progress</p>
+                                </div>
+                            </div>
+
+                            {/* Win Rate */}
                             <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-5 rounded-xl text-white shadow-lg flex flex-col justify-between">
-                                <div className="flex justify-between items-start mb-4">
-                                    <div className="p-2 bg-white/10 rounded-lg backdrop-blur-sm"><TrendingUp className="w-5 h-5 text-white"/></div>
+                                <div className="flex justify-between items-start mb-2">
+                                    <div className="p-2 bg-white/10 rounded-lg backdrop-blur-sm"><Award className="w-5 h-5 text-yellow-400"/></div>
                                 </div>
                                 <div>
-                                    <p className="text-slate-400 text-xs font-bold uppercase tracking-wide">Tasa de Éxito (Win Rate)</p>
+                                    <p className="text-slate-400 text-xs font-bold uppercase tracking-wide">Win Rate</p>
                                     <p className="text-3xl font-bold mt-1 flex items-center gap-2">
                                         {winRate}% 
-                                        {winRate > 50 ? <ArrowUpRight className="w-5 h-5 text-emerald-400" /> : <span className="text-xs text-slate-500 font-normal">Objetivo: 50%</span>}
+                                        {winRate >= 50 && <ArrowUpRight className="w-5 h-5 text-emerald-400" />}
                                     </p>
-                                    <p className="text-[10px] text-slate-500 mt-1">De proyectos cerrados</p>
+                                    <p className="text-[10px] text-slate-500 mt-1">Target: 50%+</p>
                                 </div>
                             </div>
                         </div>
 
-                        {/* Charts & Activity */}
+                        {/* Main Chart Section */}
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            {/* Chart */}
-                            <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                                <div className="flex justify-between items-center mb-6">
+                            {/* Revenue Chart */}
+                            <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-80">
+                                <div className="flex justify-between items-center mb-4">
                                     <h3 className="font-bold text-slate-800 flex items-center gap-2">
                                         <DollarSign className="w-5 h-5 text-emerald-600"/> 
-                                        Ingresos Adjudicados (6 Meses)
+                                        Revenue Trend (6 Months)
                                     </h3>
-                                    {monthlyData.every(d => d.value === 0) && (
-                                        <span className="text-xs bg-amber-50 text-amber-700 px-2 py-1 rounded border border-amber-200">
-                                            Sin datos recientes. Marca proyectos como "Won" para ver.
-                                        </span>
-                                    )}
                                 </div>
-                                <div className="h-72">
+                                <ResponsiveContainer width="100%" height="85%">
+                                    <AreaChart data={monthlyData}>
+                                        <defs>
+                                            <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
+                                                <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                                            </linearGradient>
+                                        </defs>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} />
+                                        <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} tickFormatter={(v) => `$${v/1000}k`} />
+                                        <Tooltip 
+                                            formatter={(value: number) => [`$${value.toLocaleString()}`, 'Revenue']} 
+                                            contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} 
+                                        />
+                                        <Area type="monotone" dataKey="value" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorValue)" />
+                                    </AreaChart>
+                                </ResponsiveContainer>
+                            </div>
+
+                            {/* Project Status Donut */}
+                            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-80 flex flex-col">
+                                <h3 className="font-bold text-slate-800 mb-2 flex items-center gap-2">
+                                    <Briefcase className="w-5 h-5 text-blue-600"/> 
+                                    Project Distribution
+                                </h3>
+                                <div className="flex-1">
                                     <ResponsiveContainer width="100%" height="100%">
-                                        <AreaChart data={monthlyData}>
-                                            <defs>
-                                                <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
-                                                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                                                </linearGradient>
-                                            </defs>
-                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} />
-                                            <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} tickFormatter={(v) => `$${v/1000}k`} />
-                                            <Tooltip 
-                                                formatter={(value: number) => [`$${value.toLocaleString()}`, 'Ingresos']} 
-                                                labelFormatter={(label) => {
-                                                    const item = monthlyData.find(d => d.name === label);
-                                                    return item ? item.fullName : label;
-                                                }}
-                                                contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} 
-                                            />
-                                            <Area type="monotone" dataKey="value" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorValue)" />
-                                        </AreaChart>
+                                        <PieChart>
+                                            <Pie
+                                                data={projectStatusData}
+                                                cx="50%"
+                                                cy="50%"
+                                                innerRadius={60}
+                                                outerRadius={80}
+                                                paddingAngle={5}
+                                                dataKey="value"
+                                            >
+                                                {projectStatusData.map((entry, index) => (
+                                                    <Cell key={`cell-${index}`} fill={entry.color} />
+                                                ))}
+                                            </Pie>
+                                            <Tooltip contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
+                                            <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{fontSize: '11px', fontWeight: 'bold'}}/>
+                                        </PieChart>
                                     </ResponsiveContainer>
                                 </div>
                             </div>
+                        </div>
+
+                        {/* Bottom Row: Lists & Feeds */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            
+                            {/* Upcoming Deadlines */}
+                            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-[350px] flex flex-col">
+                                <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                    <Calendar className="w-5 h-5 text-orange-500"/> Upcoming Deadlines
+                                </h3>
+                                <div className="flex-1 overflow-auto custom-scrollbar space-y-3">
+                                    {upcomingDeadlines.length > 0 ? upcomingDeadlines.map((item, i) => (
+                                        <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-100">
+                                            <div className="flex items-center gap-3">
+                                                <div className="bg-white p-1.5 rounded border border-slate-200 font-bold text-xs text-center min-w-[40px]">
+                                                    <div className="text-slate-400 text-[9px] uppercase">{new Date(item.date).toLocaleString('default', {month: 'short'})}</div>
+                                                    <div className="text-slate-800 text-sm">{new Date(item.date).getDate()}</div>
+                                                </div>
+                                                <div>
+                                                    <p className="text-sm font-bold text-slate-800 truncate max-w-[120px]">{item.name}</p>
+                                                    <p className="text-[10px] text-slate-500 truncate">{item.client}</p>
+                                                </div>
+                                            </div>
+                                            <span className={`text-[10px] px-2 py-1 rounded font-bold uppercase ${item.type === 'Completion' ? 'bg-indigo-50 text-indigo-700' : 'bg-orange-50 text-orange-700'}`}>
+                                                {item.type}
+                                            </span>
+                                        </div>
+                                    )) : (
+                                        <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                                            <CheckCircle2 className="w-8 h-8 mb-2 opacity-50" />
+                                            <p className="text-xs">No upcoming deadlines.</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Pending Change Orders */}
+                            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-[350px] flex flex-col">
+                                <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                    <FileText className="w-5 h-5 text-blue-500"/> Pending Change Orders
+                                </h3>
+                                <div className="flex-1 overflow-auto custom-scrollbar space-y-3">
+                                    {pendingTickets.length > 0 ? pendingTickets.map((t, i) => (
+                                        <div key={i} className="p-3 bg-blue-50/50 rounded-lg border border-blue-100 hover:bg-blue-50 transition-colors cursor-pointer" onClick={() => setCurrentView(ViewState.SERVICE)}>
+                                            <div className="flex justify-between items-start mb-1">
+                                                <span className="text-xs font-bold text-blue-800">{t.id}</span>
+                                                <span className="text-[10px] font-bold bg-white text-blue-600 px-1.5 py-0.5 rounded border border-blue-200">SENT</span>
+                                            </div>
+                                            <p className="text-sm font-medium text-slate-800 truncate">{t.clientName}</p>
+                                            <div className="flex justify-between items-end mt-1">
+                                                <p className="text-[10px] text-slate-500 truncate max-w-[150px]">{t.items.map(i=>i.description).join(', ')}</p>
+                                                <p className="text-xs font-bold text-slate-700">{new Date(t.dateCreated).toLocaleDateString()}</p>
+                                            </div>
+                                        </div>
+                                    )) : (
+                                        <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                                            <CheckCircle2 className="w-8 h-8 mb-2 opacity-50" />
+                                            <p className="text-xs">No pending tickets.</p>
+                                        </div>
+                                    )}
+                                </div>
+                                <button onClick={() => setCurrentView(ViewState.SERVICE)} className="mt-3 text-xs text-blue-600 font-bold hover:underline text-center w-full">View All Tickets</button>
+                            </div>
 
                             {/* Recent Activity Feed */}
-                            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-[400px]">
-                                <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Activity className="w-5 h-5 text-blue-600"/> Actividad Reciente</h3>
+                            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-[350px]">
+                                <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Activity className="w-5 h-5 text-purple-600"/> Recent Activity</h3>
                                 <div className="flex-1 overflow-auto space-y-0 custom-scrollbar pr-2">
                                     {recentActivity.length > 0 ? recentActivity.map((item, idx) => (
                                         <div key={idx} className="flex items-start gap-3 py-3 border-b border-slate-50 last:border-0 hover:bg-slate-50 px-2 rounded-lg transition-colors">
@@ -266,19 +412,12 @@ export const App = () => {
                                                 <div className="flex items-center gap-2 mt-0.5">
                                                     <span className="text-xs text-slate-500 truncate">{item.details}</span>
                                                 </div>
-                                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded mt-1 inline-block uppercase ${
-                                                    item.status === 'Won' || item.status === 'Authorized' ? 'bg-emerald-50 text-emerald-600' : 
-                                                    item.status === 'Lost' || item.status === 'Denied' ? 'bg-red-50 text-red-600' : 
-                                                    'bg-slate-100 text-slate-500'
-                                                }`}>
-                                                    {item.status}
-                                                </span>
                                             </div>
                                         </div>
                                     )) : (
                                         <div className="flex flex-col items-center justify-center h-full text-slate-400">
                                             <AlertCircle className="w-8 h-8 mb-2 opacity-50" />
-                                            <p className="text-sm text-center">No hay actividad reciente.<br/>Crea un proyecto para empezar.</p>
+                                            <p className="text-sm text-center">No activity found.</p>
                                         </div>
                                     )}
                                 </div>
