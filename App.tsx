@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { ProjectList } from './components/ProjectList';
@@ -58,7 +59,7 @@ export const App = () => {
 
     // 1. Monthly Revenue Chart (Last 6 Months Real Data) - Memoized Hook
     const monthlyData = useMemo(() => {
-        const data = [];
+        const data: { name: string; fullName: string; key: string; value: number }[] = [];
         const today = new Date();
         
         // Initialize last 6 months with 0
