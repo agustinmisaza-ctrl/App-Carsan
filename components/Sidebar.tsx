@@ -233,6 +233,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isO
 
         {/* User Profile / Footer */}
         <div className="p-4 border-t border-slate-800/50 bg-slate-900/50">
+           <a 
+                href="/user_prompts.txt"
+                download="user_prompts.txt"
+                className="w-full mb-2 flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white py-2 rounded-lg text-xs font-bold transition-colors border border-slate-700"
+            >
+                <Download className="w-3 h-3" />
+                Download Prompts
+            </a>
            <button 
                 onClick={handleInstallClick}
                 className="w-full mb-4 flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white py-2 rounded-lg text-xs font-bold transition-colors border border-slate-700"

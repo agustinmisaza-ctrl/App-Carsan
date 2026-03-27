@@ -40,7 +40,7 @@ export const robustParseDate = (val: any): Date => {
         
         // Try ISO format (fastest)
         const isoDate = new Date(cleanVal);
-        if (!isNaN(isoDate.getTime())) return isoDate;
+        if (!isNaN(isoDate.getTime()) && cleanVal.includes('-')) return isoDate;
 
         // Try DD/MM/YYYY or MM/DD/YYYY manually if slash present
         const parts = cleanVal.split(/[\/\-\.]/);
@@ -57,6 +57,24 @@ export const robustParseDate = (val: any): Date => {
     }
 
     return new Date();
+};
+
+// Helper to safely get value from object with fuzzy key matching
+export const getValue = (row: any, keywords: string[]): any => {
+    const keys = Object.keys(row);
+    
+    // 1. Exact match
+    for (const k of keywords) {
+        if (row[k] !== undefined && row[k] !== null && row[k] !== '') return row[k];
+    }
+    
+    // 2. Case insensitive match
+    for (const k of keywords) {
+        const match = keys.find(key => key.toLowerCase().trim() === k.toLowerCase().trim());
+        if (match && row[match] !== undefined) return row[match];
+    }
+    
+    return undefined;
 };
 
 // Helper to parse CSV line respecting quotes

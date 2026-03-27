@@ -1,8 +1,10 @@
+
 import React, { useState } from 'react';
 import { MaterialItem } from '../types';
 import { Plus, Trash2, Upload, Search, Download, Sparkles, Filter, Database, CheckCircle, BrainCircuit } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { MIAMI_STANDARD_PRICES } from '../utils/miamiStandards';
+import { getValue, parseCurrency, parseNumber } from '../utils/purchaseData';
 
 interface PriceDatabaseProps {
   materials: MaterialItem[];
@@ -73,26 +75,46 @@ export const PriceDatabase: React.FC<PriceDatabaseProps> = ({ materials, setMate
         const workbook = XLSX.read(data, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+        let jsonData = XLSX.utils.sheet_to_json(worksheet);
 
         if (Array.isArray(jsonData)) {
-            // Fix: Cast 'source' to 'Real' as const to satisfy MaterialItem['source'] type constraint ('AI' | 'Real')
-            const newItems: MaterialItem[] = jsonData.map((row: any, index: number) => ({
-                id: Date.now().toString() + index,
-                name: row['Item Name'] || row['Name'] || row['Description'] || 'Unknown Item',
-                category: row['Category'] || row['Cat'] || 'General',
-                unit: row['Unit'] || row['UOM'] || 'EA',
-                materialCost: Number(row['Material Cost'] || row['Cost'] || row['Price'] || 0),
-                laborHours: Number(row['Labor Hours'] || row['Labor'] || row['Hours'] || 0),
-                source: 'Real' as const
-            })).filter(item => item.name !== 'Unknown Item');
+            // Clean keys to remove BOM or whitespace from CSV headers
+            jsonData = jsonData.map((row: any) => {
+                const newRow: any = {};
+                Object.keys(row).forEach(key => {
+                    const cleanKey = key.trim().replace(/^[\uFEFF\uFFFE]/, '');
+                    newRow[cleanKey] = row[key];
+                });
+                return newRow;
+            });
+
+            const newItems: MaterialItem[] = jsonData.map((row: any, index: number): MaterialItem | null => {
+                const name = getValue(row, ['Item Name', 'Name', 'Description', 'Item']);
+                const category = getValue(row, ['Category', 'Cat', 'Type']) || 'General';
+                const unit = getValue(row, ['Unit', 'UOM', 'Units']) || 'EA';
+                // Robustly parse cost using helper that handles currency symbols and quotes
+                const cost = parseCurrency(getValue(row, ['Material Cost', 'Cost', 'Price', 'Unit Cost']));
+                const labor = parseNumber(getValue(row, ['Labor Hours', 'Labor', 'Hours']));
+
+                if (!name) return null;
+
+                return {
+                    id: Date.now().toString() + index,
+                    name: String(name),
+                    category: String(category),
+                    unit: String(unit),
+                    materialCost: cost,
+                    laborHours: labor,
+                    source: 'Real'
+                };
+            }).filter((item): item is MaterialItem => item !== null);
 
             setMaterials([...materials, ...newItems]);
             alert(`Imported ${newItems.length} items successfully as Real Prices.`);
         }
       } catch (err) {
         console.error(err);
-        alert("Failed to parse Excel file. Ensure headers are: Category, Item Name, Unit, Material Cost, Labor Hours.");
+        alert("Failed to parse file. Ensure it contains Item Name and Cost.");
       }
     };
     reader.readAsArrayBuffer(file);
