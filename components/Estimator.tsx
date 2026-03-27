@@ -2,12 +2,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ProjectEstimate, EstimateLineItem, MaterialItem, ProjectFile } from '../types';
 import { analyzeBlueprint } from '../services/geminiService';
-import { UploadCloud, Loader2, Plus, Trash2, FileText, Check, ChevronDown, ChevronUp, Calendar, MapPin, User, Phone, Briefcase, X, AlertCircle, AlertTriangle } from 'lucide-react';
+import { UploadCloud, Loader2, Plus, Trash2, FileText, Check, ChevronDown, ChevronUp, Calendar, MapPin, User, Phone, Briefcase, X, AlertCircle, AlertTriangle, Save } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 
 interface EstimatorProps {
   materials: MaterialItem[];
   projects: ProjectEstimate[]; 
+  setProjects: (projects: ProjectEstimate[]) => void;
+  onClose: () => void;
+  initialEstimate?: ProjectEstimate;
 }
 
 const readFileAsBase64 = (file: File): Promise<string> => {
@@ -19,10 +22,10 @@ const readFileAsBase64 = (file: File): Promise<string> => {
     });
 };
 
-export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => {
-  const [estimate, setEstimate] = useState<ProjectEstimate>({
-    id: 'new',
-    name: 'Untitled Project',
+export const Estimator: React.FC<EstimatorProps> = ({ materials, projects, setProjects, onClose, initialEstimate }) => {
+  const [estimate, setEstimate] = useState<ProjectEstimate>(initialEstimate || {
+    id: `EST-${Date.now()}`,
+    name: '',
     client: '',
     contactInfo: '',
     address: 'Miami, FL',
@@ -34,7 +37,7 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
     status: 'Draft',
     laborRate: 75,
     items: [],
-    projectFiles: [] // Initialize empty
+    projectFiles: [] 
   });
 
   const [analyzing, setAnalyzing] = useState(false);
@@ -42,6 +45,7 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
   const [activeTab, setActiveTab] = useState<'upload' | 'worksheet' | 'summary'>('upload');
   const [showDetails, setShowDetails] = useState(false); 
   const [showClientSuggestions, setShowClientSuggestions] = useState(false);
+  const [showEstimatorSuggestions, setShowEstimatorSuggestions] = useState(false);
   const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'warning', message: string } | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -53,6 +57,11 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
   const filteredClients = uniqueClients.filter((c: string) => 
     c.toLowerCase().includes(estimate.client.toLowerCase()) && 
     c.toLowerCase() !== estimate.client.toLowerCase()
+  );
+
+  const filteredEstimators = uniqueEstimators.filter((e: string) => 
+    e.toLowerCase().includes((estimate.estimator || '').toLowerCase()) && 
+    e.toLowerCase() !== (estimate.estimator || '').toLowerCase()
   );
 
   useEffect(() => {
@@ -79,6 +88,36 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
       await (window as any).aistudio.openSelectKey();
       setHasApiKey(true);
     }
+  };
+
+  const handleSave = () => {
+    if (!estimate.name) {
+      setNotification({ type: 'error', message: 'Please enter a project name.' });
+      return;
+    }
+    if (!estimate.client) {
+      setNotification({ type: 'error', message: 'Please enter a client name.' });
+      return;
+    }
+
+    const finalEstimate: ProjectEstimate = {
+      ...estimate,
+      contractValue: grandTotal,
+      dateCreated: estimate.dateCreated || new Date().toISOString()
+    };
+
+    // Check if updating or creating
+    const existingIdx = projects.findIndex(p => p.id === estimate.id);
+    if (existingIdx >= 0) {
+      const updatedProjects = [...projects];
+      updatedProjects[existingIdx] = finalEstimate;
+      setProjects(updatedProjects);
+    } else {
+      setProjects([finalEstimate, ...projects]);
+    }
+
+    setNotification({ type: 'success', message: 'Estimate saved successfully!' });
+    setTimeout(() => onClose(), 1000);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -267,6 +306,20 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
                     </div>
                     
                     <div className="flex flex-col items-end gap-3">
+                         <div className="flex items-center gap-2 mb-1">
+                            <button 
+                                onClick={onClose}
+                                className="px-4 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button 
+                                onClick={handleSave}
+                                className="bg-emerald-600 text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-emerald-700 transition shadow-sm flex items-center gap-2"
+                            >
+                                <Save className="w-4 h-4" /> Save Estimate
+                            </button>
+                         </div>
                          <div className="bg-slate-100 p-1 rounded-lg flex shrink-0">
                             {(['upload', 'worksheet', 'summary'] as const).map((tab) => (
                                 <button 
@@ -388,15 +441,30 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
                              <div>
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Estimator</label>
                                 <div className="relative">
-                                    <select 
+                                    <input 
                                         value={estimate.estimator || ''}
-                                        onChange={(e) => setEstimate({...estimate, estimator: e.target.value})}
-                                        className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none bg-white appearance-none"
-                                    >
-                                        <option value="">Select Estimator</option>
-                                        {uniqueEstimators.map(est => <option key={est} value={est}>{est}</option>)}
-                                    </select>
-                                    <ChevronDown className="absolute right-3 top-2.5 w-4 h-4 text-slate-400 pointer-events-none" />
+                                        onChange={(e) => {
+                                            setEstimate({...estimate, estimator: e.target.value});
+                                            setShowEstimatorSuggestions(true);
+                                        }}
+                                        onBlur={() => setTimeout(() => setShowEstimatorSuggestions(false), 200)}
+                                        onFocus={() => setShowEstimatorSuggestions(true)}
+                                        className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                                        placeholder="Estimator name..."
+                                    />
+                                    {showEstimatorSuggestions && filteredEstimators.length > 0 && (
+                                        <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 rounded-lg shadow-lg mt-1 z-50 max-h-40 overflow-y-auto">
+                                            {filteredEstimators.map((est, idx) => (
+                                                <div 
+                                                    key={idx}
+                                                    className="px-4 py-2 text-sm hover:bg-blue-50 cursor-pointer text-slate-700"
+                                                    onMouseDown={() => setEstimate({...estimate, estimator: est})}
+                                                >
+                                                    {est}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                              </div>
                         </div>

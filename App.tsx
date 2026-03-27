@@ -14,11 +14,13 @@ import { User, ViewState, ProjectEstimate, MaterialItem, ServiceTicket, Lead, Pu
 import { MIAMI_STANDARD_PRICES } from './utils/miamiStandards';
 import { INITIAL_CSV_DATA, processPurchaseData } from './utils/purchaseData';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Briefcase, TrendingUp, Users, DollarSign, Clock, ArrowUpRight, Activity, FileText, CheckCircle2, AlertCircle, Plus, Calendar, Hammer, AlertTriangle, Award } from 'lucide-react';
+import { Briefcase, TrendingUp, Users, DollarSign, Clock, ArrowUpRight, Activity, FileText, CheckCircle2, AlertCircle, Plus, Calendar, Hammer, AlertTriangle, Award, Menu } from 'lucide-react';
 
 export const App = () => {
     const [user, setUser] = useState<User | null>(null);
     const [currentView, setCurrentView] = useState<ViewState>(ViewState.DASHBOARD);
+    const [selectedProject, setSelectedProject] = useState<ProjectEstimate | null>(null);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     
     // Data State
     const [projects, setProjects] = useState<ProjectEstimate[]>(() => {
@@ -429,9 +431,30 @@ export const App = () => {
             case ViewState.CRM:
                 return <CRM leads={leads} setLeads={setLeads} opportunities={opportunities} setOpportunities={setOpportunities} projects={projects} setProjects={setProjects} />;
             case ViewState.PROJECTS:
-                return <ProjectList projects={projects} setProjects={setProjects} tickets={tickets} onOpenProject={(p) => {}} />;
+                return (
+                    <ProjectList 
+                        projects={projects} 
+                        setProjects={setProjects} 
+                        tickets={tickets} 
+                        onOpenProject={(p) => {
+                            setSelectedProject(p);
+                            setCurrentView(ViewState.ESTIMATE_NEW);
+                        }} 
+                    />
+                );
             case ViewState.ESTIMATE_NEW:
-                return <Estimator materials={materials} projects={projects} />;
+                return (
+                    <Estimator 
+                        materials={materials} 
+                        projects={projects} 
+                        setProjects={setProjects}
+                        onClose={() => {
+                            setSelectedProject(null);
+                            setCurrentView(ViewState.PROJECTS);
+                        }}
+                        initialEstimate={selectedProject || undefined}
+                    />
+                );
             case ViewState.SERVICE:
                 return <ServiceModule user={user} materials={materials} projects={projects} tickets={tickets} setTickets={setTickets} />;
             case ViewState.PRICE_ANALYSIS:
@@ -449,13 +472,28 @@ export const App = () => {
         <div className="flex h-screen bg-slate-100 font-sans text-slate-900 overflow-hidden">
             <Sidebar 
                 currentView={currentView} 
-                onChangeView={setCurrentView} 
-                isOpen={true} 
-                onClose={() => {}} 
+                onChangeView={(view) => {
+                    if (view === ViewState.ESTIMATE_NEW) {
+                        setSelectedProject(null);
+                    }
+                    setCurrentView(view);
+                }} 
+                isOpen={isSidebarOpen} 
+                onClose={() => setIsSidebarOpen(false)} 
                 user={user} 
                 onLogout={() => setUser(null)} 
             />
             <main className="flex-1 overflow-auto relative w-full">
+                {/* Mobile Header */}
+                <div className="md:hidden flex items-center justify-between p-4 bg-white border-b border-slate-200">
+                    <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded bg-blue-600 flex items-center justify-center text-white font-bold text-xs">C</div>
+                        <span className="font-bold text-slate-800">CARSAN</span>
+                    </div>
+                    <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg">
+                        <Menu className="w-6 h-6" />
+                    </button>
+                </div>
                 {renderView()}
                 <AIAssistant projects={projects} materials={materials} tickets={tickets} leads={leads} purchases={purchases} />
             </main>
