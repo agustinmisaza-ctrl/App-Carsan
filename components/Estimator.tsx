@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ProjectEstimate, EstimateLineItem, MaterialItem, ProjectFile } from '../types';
 import { analyzeBlueprint } from '../services/geminiService';
-import { UploadCloud, Loader2, Plus, Trash2, FileText, Check, ChevronDown, ChevronUp, Calendar, MapPin, User, Phone, Briefcase, X, AlertCircle } from 'lucide-react';
+import { UploadCloud, Loader2, Plus, Trash2, FileText, Check, ChevronDown, ChevronUp, Calendar, MapPin, User, Phone, Briefcase, X, AlertCircle, AlertTriangle } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 
 interface EstimatorProps {
@@ -61,6 +61,25 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
           return () => clearTimeout(timer);
       }
   }, [notification]);
+
+  const [hasApiKey, setHasApiKey] = useState(true);
+
+  useEffect(() => {
+    const checkApiKey = async () => {
+      if ((window as any).aistudio?.hasSelectedApiKey) {
+        const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+        setHasApiKey(hasKey);
+      }
+    };
+    checkApiKey();
+  }, []);
+
+  const handleConnectKey = async () => {
+    if ((window as any).aistudio?.openSelectKey) {
+      await (window as any).aistudio.openSelectKey();
+      setHasApiKey(true);
+    }
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -124,9 +143,19 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
                     }));
                     itemsAddedCount += newItems.length;
                 }
-            } catch (err) {
+            } catch (err: any) {
                 console.error(`Analysis failed for ${file.name}:`, err);
-                setNotification({ type: 'warning', message: `Could not analyze ${file.name}. It was added to files but no items were extracted.` });
+                const errorMsg = err.message || '';
+                if (errorMsg.includes('Requested entity was not found') || errorMsg.includes('API key')) {
+                    setNotification({ type: 'error', message: "A Pro API Key is required for blueprint analysis. Please connect your key." });
+                    setHasApiKey(false);
+                    break; // Stop processing if it's an auth error
+                } else if (errorMsg.includes('Quota exceeded')) {
+                    setNotification({ type: 'error', message: "Gemini API quota exceeded. Please try again later or use a different key." });
+                    break;
+                } else {
+                    setNotification({ type: 'warning', message: `Could not analyze ${file.name}: ${errorMsg.substring(0, 50)}...` });
+                }
             } finally {
                 // Remove from processing list regardless of success/fail
                 setProcessingFiles(prev => prev.filter(name => name !== file.name));
@@ -140,8 +169,8 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
             setNotification({ type: 'warning', message: "Files uploaded, but AI found no recognized electrical symbols." });
         }
 
-    } catch (err) {
-        setNotification({ type: 'error', message: "Critical error during upload. Please try again." });
+    } catch (err: any) {
+        setNotification({ type: 'error', message: err.message || "Critical error during upload. Please try again." });
     } finally {
         setAnalyzing(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -420,6 +449,27 @@ export const Estimator: React.FC<EstimatorProps> = ({ materials, projects }) => 
         {/* VIEW: UPLOAD */}
         {activeTab === 'upload' && (
             <div className="max-w-6xl mx-auto mt-8">
+                {/* API Key Warning */}
+                {!hasApiKey && (
+                    <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4 animate-in fade-in slide-in-from-left-4 duration-500">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-amber-100 rounded-lg">
+                                <AlertTriangle className="w-5 h-5 text-amber-600" />
+                            </div>
+                            <div>
+                                <p className="text-sm text-amber-900 font-bold">Pro API Key Required</p>
+                                <p className="text-xs text-amber-700">A paid Google Cloud API key is required for high-accuracy blueprint analysis.</p>
+                            </div>
+                        </div>
+                        <button 
+                            onClick={handleConnectKey}
+                            className="bg-amber-600 text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition shadow-sm whitespace-nowrap"
+                        >
+                            Connect Key
+                        </button>
+                    </div>
+                )}
+
                 {/* File Drop / Action Area */}
                 <div 
                     className={`bg-white rounded-2xl border-2 border-dashed p-12 text-center transition-all group relative overflow-hidden mb-8 ${

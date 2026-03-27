@@ -2,11 +2,11 @@
 import { GoogleGenAI, Type, Chat, LiveServerMessage, Modality } from "@google/genai";
 import { MaterialItem, AnalysisResult, Lead, ProjectEstimate, ServiceTicket, PurchaseRecord } from "../types";
 
-// Adhere to coding guidelines for model selection: 'gemini-3-flash-preview' for general text tasks
+// Adhere to coding guidelines for model selection
 const GEMINI_MODEL = "gemini-3-flash-preview";
 // Use Pro model for complex blueprint analysis/vision tasks to improve recognition accuracy
-const VISION_MODEL = "gemini-3-pro-preview"; 
-const LIVE_MODEL = 'gemini-2.5-flash-native-audio-preview-09-2025';
+const VISION_MODEL = "gemini-3.1-pro-preview"; 
+const LIVE_MODEL = 'gemini-3.1-flash-live-preview';
 
 // Schema for the analysis response
 const analysisSchema = {
@@ -113,11 +113,12 @@ export const analyzeBlueprint = async (
   base64Image: string, 
   materialDb: MaterialItem[]
 ): Promise<AnalysisResult> => {
-  if (!process.env.API_KEY) {
-    throw new Error("API Key not found in environment variables.");
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+  if (!apiKey) {
+    throw new Error("Gemini API Key not found in environment variables.");
   }
 
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey });
 
   // Prepare a context string from the material DB to help Gemini match terms
   const dbContext = materialDb.map(m => `- ${m.name} (${m.category})`).join("\n");
@@ -126,10 +127,16 @@ export const analyzeBlueprint = async (
     You are an expert electrical estimator for residential and commercial construction in Miami, Florida.
     
     Task:
-    1. Analyze the provided electrical blueprint image or PDF page.
-    2. Identify standard electrical symbols and components (Outlets, Switches, Lights, Panels, J-Boxes, Smoke Detectors).
-    3. Count the quantities of each component found accurately.
-    4. Return the data in a structured JSON format.
+    1. Analyze all pages of the provided electrical blueprint document (PDF or Image).
+    2. Identify EVERY standard electrical symbol and component. Look for:
+       - Receptacles (Duplex, GFI, Quad, Floor, etc.)
+       - Switches (Single pole, 3-way, 4-way, Dimmer, Motion, etc.)
+       - Lighting (Recessed cans, Surface mounts, Exit signs, Emergency lights, etc.)
+       - Power (Panels, Disconnects, Transformers, J-Boxes, etc.)
+       - Systems (Smoke detectors, Fire alarm devices, Data/Com outlets, etc.)
+    3. Count the quantities of each component found accurately across all pages.
+    4. Map these findings to the user's material database where possible.
+    5. Return the data in a structured JSON format.
 
     Context - Available Price Database Items:
     The user has the following items in their database. Map your findings to these specific names where possible.
@@ -142,7 +149,7 @@ export const analyzeBlueprint = async (
       - Duplex Receptacles vs GFI Receptacles
       - Single Pole Switches vs 3-Way/4-Way Switches
       - Recessed Cans vs Surface Mount Lights
-    - Return a realistic count. If the image is a partial view, count only what is visible.
+    - Return a realistic count. If the document has multiple pages, sum the counts from all relevant pages.
   `;
 
   // Dynamically detect mimeType (fixes INVALID_ARGUMENT error for PDFs/JPEGs)
@@ -180,9 +187,14 @@ export const analyzeBlueprint = async (
 
     return JSON.parse(text) as AnalysisResult;
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini Analysis Error:", error);
-    throw new Error("Failed to analyze blueprint. Ensure the file is a valid Image or PDF.");
+    // Pass through specific errors like "Requested entity was not found" or "Quota exceeded"
+    const errorMsg = error.message || String(error);
+    if (errorMsg.includes('Requested entity was not found') || errorMsg.includes('API key') || errorMsg.includes('Quota exceeded')) {
+        throw error;
+    }
+    throw new Error(`Analysis failed: ${errorMsg}`);
   }
 };
 
@@ -190,8 +202,9 @@ export const analyzeBlueprint = async (
  * Uses Google Search grounding to find live prices for an electrical material.
  */
 export const fetchLiveWebPrices = async (itemName: string): Promise<{ text: string, sources: { uri: string, title: string }[] }> => {
-  if (!process.env.API_KEY) throw new Error("API Key not found");
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+  if (!apiKey) throw new Error("Gemini API Key not found");
+  const ai = new GoogleGenAI({ apiKey });
 
   const prompt = `Find the current price for "${itemName}" from electrical suppliers like City Electric Supply (CES), World Electric, or Home Depot in the Miami/Florida area. Provide a clear summary of the latest price per unit and provide direct links to the products if found. Focus on professional contractor pricing if available.`;
 
@@ -222,8 +235,9 @@ export const fetchLiveWebPrices = async (itemName: string): Promise<{ text: stri
 };
 
 export const analyzeSchedule = async (base64File: string): Promise<string> => {
-    if (!process.env.API_KEY) throw new Error("API Key not found");
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    if (!apiKey) throw new Error("Gemini API Key not found");
+    const ai = new GoogleGenAI({ apiKey });
     const { mimeType, data } = parseBase64(base64File);
 
     const prompt = `
@@ -259,8 +273,9 @@ export const analyzeSchedule = async (base64File: string): Promise<string> => {
 };
 
 export const extractLeadFromText = async (text: string): Promise<Partial<Lead>> => {
-    if (!process.env.API_KEY) throw new Error("API Key not found");
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    if (!apiKey) throw new Error("Gemini API Key not found");
+    const ai = new GoogleGenAI({ apiKey });
 
     try {
         const response = await ai.models.generateContent({
@@ -290,8 +305,9 @@ export const extractLeadFromText = async (text: string): Promise<Partial<Lead>> 
 };
 
 export const analyzeIncomingEmail = async (subject: string, body: string): Promise<any> => {
-    if (!process.env.API_KEY) throw new Error("API Key not found");
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    if (!apiKey) throw new Error("Gemini API Key not found");
+    const ai = new GoogleGenAI({ apiKey });
 
     const prompt = `
       Analyze this incoming email for an electrical contracting business.
@@ -338,8 +354,9 @@ export const analyzeIncomingEmail = async (subject: string, body: string): Promi
 };
 
 export const extractInvoiceData = async (base64File: string): Promise<PurchaseRecord[]> => {
-    if (!process.env.API_KEY) throw new Error("API Key not found");
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    if (!apiKey) throw new Error("Gemini API Key not found");
+    const ai = new GoogleGenAI({ apiKey });
     const { mimeType, data } = parseBase64(base64File);
 
     const prompt = `
@@ -431,8 +448,9 @@ export const generateInvoiceFromNotes = async (
     notes: string,
     materialDb: MaterialItem[]
 ): Promise<any[]> => {
-    if (!process.env.API_KEY) throw new Error("API Key not found");
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    if (!apiKey) throw new Error("Gemini API Key not found");
+    const ai = new GoogleGenAI({ apiKey });
 
     // Create a simplified DB map to reduce token usage
     const dbContext = materialDb.map(m => `ID: ${m.id} | Name: ${m.name}`).join("\n");
@@ -491,10 +509,11 @@ export const createAssistantChat = (
   leads: Lead[] = [],
   purchases: PurchaseRecord[] = []
 ): Chat => {
-  if (!process.env.API_KEY) {
-    throw new Error("API Key not found");
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+  if (!apiKey) {
+    throw new Error("Gemini API Key not found");
   }
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey });
 
   // Generate a concise summary of the application data for context
   const projectSummary = projects.map(p => 
@@ -570,10 +589,11 @@ export const connectLiveSession = async (callbacks: {
     onclose?: (e: CloseEvent) => void;
     onerror?: (e: ErrorEvent) => void;
 }) => {
-     if (!process.env.API_KEY) {
-        throw new Error("API Key not found");
+      const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+      if (!apiKey) {
+        throw new Error("Gemini API Key not found");
       }
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey });
 
       return ai.live.connect({
         model: LIVE_MODEL,
